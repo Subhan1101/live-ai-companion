@@ -58,20 +58,13 @@ const Index = () => {
   );
 
   const handleMicPress = useCallback(() => {
-    if (!isConnected) {
-      toast({
-        title: "Not connected",
-        description: "Please wait for the connection to be established.",
-        variant: "destructive",
-      });
-      return;
-    }
-    startRecording();
-  }, [isConnected, startRecording]);
+    // Auto-listen mode is now always active after connection
+    // This button no longer needed for push-to-talk
+  }, []);
 
   const handleMicRelease = useCallback(() => {
-    stopRecording();
-  }, [stopRecording]);
+    // Auto-listen mode handles this automatically
+  }, []);
 
   const handleToggleCamera = () => {
     setIsCameraOn((prev) => !prev);
