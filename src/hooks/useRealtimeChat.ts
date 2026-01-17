@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AudioRecorder, encodeAudioForAPI, AudioQueue } from "@/lib/audioUtils";
+import { toast } from "@/hooks/use-toast";
 
 interface Message {
   id: string;
@@ -97,21 +98,52 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               setIsConnected(true);
               break;
 
-            case "proxy.error":
+            case "proxy.error": {
               console.error("Proxy error:", data);
-              setIsConnected(false);
-              setIsProcessing(false);
-              setIsSpeaking(false);
-              setStatus("idle");
-              break;
 
-            case "proxy.openai_closed":
-              console.error("OpenAI connection closed (via proxy):", data);
+              const title = "Voice connection failed";
+              const description =
+                typeof data.reason === "string" && data.reason.length > 0
+                  ? data.reason
+                  : typeof data.message === "string" && data.message.length > 0
+                    ? data.message
+                    : "Backend proxy error";
+
+              toast({
+                title,
+                description,
+                variant: "destructive",
+              });
+
               setIsConnected(false);
               setIsProcessing(false);
               setIsSpeaking(false);
               setStatus("idle");
               break;
+            }
+
+            case "proxy.openai_closed": {
+              console.error("OpenAI connection closed (via proxy):", data);
+
+              const description =
+                typeof data.reason === "string" && data.reason.length > 0
+                  ? `Code ${data.code}: ${data.reason}`
+                  : typeof data.code === "number"
+                    ? `Code ${data.code}`
+                    : "Connection closed";
+
+              toast({
+                title: "Voice connection closed",
+                description,
+                variant: "destructive",
+              });
+
+              setIsConnected(false);
+              setIsProcessing(false);
+              setIsSpeaking(false);
+              setStatus("idle");
+              break;
+            }
 
             case "session.created":
               console.log("Session created, sending configuration with Whisper-1 STT...");

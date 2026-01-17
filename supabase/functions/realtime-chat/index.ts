@@ -1,6 +1,23 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+const getOpenAIApiKey = () => {
+  const raw = Deno.env.get("OPENAI_API_KEY") ?? "";
+  let key = raw.trim();
+
+  // Common copy/paste mistakes: quotes or "Bearer " prefix
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+
+  if (key.toLowerCase().startsWith("bearer ")) {
+    key = key.slice("bearer ".length).trim();
+  }
+
+  return key;
+};
 
 // IMPORTANT: Use the exact Realtime endpoint required by the app
 const OPENAI_REALTIME_URL =
@@ -14,10 +31,17 @@ serve(async (req) => {
     return new Response("Expected WebSocket upgrade", { status: 426 });
   }
 
-  if (!OPENAI_API_KEY) {
-    console.error("OPENAI_API_KEY is not configured");
+  const apiKey = getOpenAIApiKey();
+  if (!apiKey) {
+    console.error("OPENAI_API_KEY is not configured (or empty after trimming)");
     return new Response("Server configuration error", { status: 500 });
   }
+
+  // Don't log secrets; log only safe metadata
+  console.log("Realtime proxy starting", {
+    keyLength: apiKey.length,
+    looksLikeSk: apiKey.startsWith("sk-"),
+  });
 
   const { socket: clientSocket, response } = Deno.upgradeWebSocket(req);
 
@@ -29,7 +53,7 @@ serve(async (req) => {
     // Connect to OpenAI Realtime API
     openaiSocket = new WebSocket(OPENAI_REALTIME_URL, [
       "realtime",
-      `openai-insecure-api-key.${OPENAI_API_KEY}`,
+      `openai-insecure-api-key.${apiKey}`,
       "openai-beta.realtime-v1",
     ]);
 
@@ -51,14 +75,34 @@ serve(async (req) => {
       console.error("OpenAI WebSocket error:", error);
       if (clientSocket.readyState === WebSocket.OPEN) {
         clientSocket.send(
-          JSON.stringify({ type: "proxy.error", message: "OpenAI websocket error" })
+          JSON.stringify({
+            type: "proxy.error",
+            message: "OpenAI websocket error",
+          })
         );
       }
     };
 
     openaiSocket.onclose = (event) => {
       console.log("OpenAI connection closed:", event.code, event.reason);
+
+      // Surface common auth failures explicitly to the client
+      const reason = String(event.reason ?? "");
+      const looksLikeInvalidKey =
+        event.code === 3000 && reason.toLowerCase().includes("invalid_api_key");
+
       if (clientSocket.readyState === WebSocket.OPEN) {
+        if (looksLikeInvalidKey) {
+          clientSocket.send(
+            JSON.stringify({
+              type: "proxy.error",
+              message: "OpenAI rejected the API key (invalid or missing Realtime access)",
+              code: event.code,
+              reason: event.reason,
+            })
+          );
+        }
+
         clientSocket.send(
           JSON.stringify({
             type: "proxy.openai_closed",
