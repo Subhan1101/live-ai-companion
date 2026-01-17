@@ -1,7 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01";
+
+// Use a GA Realtime model by default (the old 2024-10-01 snapshot is deprecated)
+const OPENAI_REALTIME_MODEL = Deno.env.get("OPENAI_REALTIME_MODEL") ?? "gpt-realtime";
+const OPENAI_REALTIME_URL = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(OPENAI_REALTIME_MODEL)}`;
 
 serve(async (req) => {
   // Handle WebSocket upgrade
@@ -31,7 +34,12 @@ serve(async (req) => {
     ]);
 
     openaiSocket.onopen = () => {
-      console.log("Connected to OpenAI Realtime API");
+      console.log("Connected to OpenAI Realtime API", { model: OPENAI_REALTIME_MODEL });
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        clientSocket.send(
+          JSON.stringify({ type: "proxy.openai_connected", model: OPENAI_REALTIME_MODEL })
+        );
+      }
     };
 
     openaiSocket.onmessage = (event) => {
@@ -43,11 +51,24 @@ serve(async (req) => {
 
     openaiSocket.onerror = (error) => {
       console.error("OpenAI WebSocket error:", error);
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        clientSocket.send(
+          JSON.stringify({ type: "proxy.error", message: "OpenAI websocket error" })
+        );
+      }
     };
 
     openaiSocket.onclose = (event) => {
       console.log("OpenAI connection closed:", event.code, event.reason);
       if (clientSocket.readyState === WebSocket.OPEN) {
+        clientSocket.send(
+          JSON.stringify({
+            type: "proxy.openai_closed",
+            code: event.code,
+            reason: event.reason,
+            model: OPENAI_REALTIME_MODEL,
+          })
+        );
         clientSocket.close();
       }
     };
