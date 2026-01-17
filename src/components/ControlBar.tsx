@@ -1,14 +1,15 @@
-import { Video, Mic, MonitorUp, LogOut, Circle } from "lucide-react";
+import { Video, Mic, MonitorUp, Phone, PhoneOff, Circle } from "lucide-react";
 
 interface ControlBarProps {
   isCameraOn: boolean;
   isMicOn: boolean;
   isRecording: boolean;
+  isCallActive: boolean;
   recordingTime: number;
   onToggleCamera: () => void;
   onToggleMic: () => void;
   onShare: () => void;
-  onLeave: () => void;
+  onToggleCall: () => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -22,11 +23,12 @@ export const ControlBar = ({
   isCameraOn,
   isMicOn,
   isRecording,
+  isCallActive,
   recordingTime,
   onToggleCamera,
   onToggleMic,
   onShare,
-  onLeave,
+  onToggleCall,
 }: ControlBarProps) => {
   return (
     <div className="flex items-center justify-between px-6 py-4">
@@ -61,10 +63,14 @@ export const ControlBar = ({
         </button>
         <span className="text-xs text-muted-foreground">Share</span>
 
-        <button onClick={onLeave} className="control-button control-button-danger">
-          <LogOut className="w-6 h-6" />
+        {/* Call toggle button */}
+        <button 
+          onClick={onToggleCall} 
+          className={`control-button ${isCallActive ? "control-button-danger" : "control-button-success"}`}
+        >
+          {isCallActive ? <PhoneOff className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
         </button>
-        <span className="text-xs text-muted-foreground">Leave</span>
+        <span className="text-xs text-muted-foreground">{isCallActive ? "End" : "Call"}</span>
       </div>
 
       {/* Right spacer for balance */}

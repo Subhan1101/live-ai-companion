@@ -102,13 +102,21 @@ const Index = () => {
     });
   };
 
-  const handleLeave = () => {
-    disconnect();
-    setRecordingTime(0);
-    toast({
-      title: "Left the call",
-      description: "You have left the conversation.",
-    });
+  const handleToggleCall = () => {
+    if (isConnected) {
+      disconnect();
+      setRecordingTime(0);
+      toast({
+        title: "Call ended",
+        description: "You have ended the conversation.",
+      });
+    } else {
+      connect();
+      toast({
+        title: "Calling...",
+        description: "Connecting to Aria.",
+      });
+    }
   };
 
   return (
@@ -154,11 +162,12 @@ const Index = () => {
         isCameraOn={isCameraOn}
         isMicOn={isMicOn}
         isRecording={isRecording}
+        isCallActive={isConnected}
         recordingTime={recordingTime}
         onToggleCamera={handleToggleCamera}
         onToggleMic={handleToggleMic}
         onShare={handleShare}
-        onLeave={handleLeave}
+        onToggleCall={handleToggleCall}
       />
 
       {/* Connection status indicator */}
