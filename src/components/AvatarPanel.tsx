@@ -33,8 +33,8 @@ const WaveformVisualizer = ({ audioLevel, isActive }: { audioLevel: number; isAc
   );
 };
 
-// Default Simli face ID - you can change this to any available face
-const SIMLI_FACE_ID = "tmp9i8bbq7c";
+// Simli face ID - using a female avatar for Aria
+const SIMLI_FACE_ID = "5514e24d-6086-46a3-ace4-6a7264e5cb7c";
 
 export const AvatarPanel = ({
   status,
@@ -188,7 +188,7 @@ export const AvatarPanel = ({
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/40 to-transparent">
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-2">
-            <h2 className="text-2xl font-display font-bold text-white drop-shadow-md">Mr. Maddle</h2>
+            <h2 className="text-2xl font-display font-bold text-white drop-shadow-md">Aria</h2>
             <div className={`status-badge ${isListening ? "status-listening" : "status-speaking"}`}>
               {getStatusText()}
               {isListening && <WaveformVisualizer audioLevel={audioLevel} isActive={isListening} />}
