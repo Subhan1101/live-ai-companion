@@ -21,6 +21,7 @@ interface UseRealtimeChatReturn {
   disconnect: () => void;
   startRecording: () => void;
   stopRecording: () => void;
+  setSimliAudioHandler: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
 }
 
 const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
@@ -41,6 +42,20 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const audioQueueRef = useRef<AudioQueue | null>(null);
   const audioLevelIntervalRef = useRef<number | null>(null);
   const sessionCreatedRef = useRef(false);
+  
+  // Simli audio handlers
+  const simliSendAudioRef = useRef<((data: Uint8Array) => void) | null>(null);
+  const simliClearBufferRef = useRef<(() => void) | null>(null);
+
+  // Set Simli audio handler from AvatarPanel
+  const setSimliAudioHandler = useCallback(
+    (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => {
+      console.log("Simli audio handler set");
+      simliSendAudioRef.current = sendAudio;
+      simliClearBufferRef.current = clearBuffer;
+    },
+    []
+  );
 
   // Cleanup on unmount
   useEffect(() => {
@@ -53,7 +68,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     console.log("Connecting to realtime chat...");
 
     try {
-      // Initialize audio context
+      // Initialize audio context for fallback playback
       audioContextRef.current = new AudioContext({ sampleRate: 24000 });
       audioQueueRef.current = new AudioQueue(audioContextRef.current);
 
@@ -110,6 +125,10 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               console.log("Speech started");
               setStatus("listening");
               setPartialTranscript("");
+              // Clear Simli buffer when user starts speaking (interruption)
+              if (simliClearBufferRef.current) {
+                simliClearBufferRef.current();
+              }
               break;
 
             case "input_audio_buffer.speech_stopped":
@@ -142,14 +161,25 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               setIsSpeaking(true);
               setStatus("speaking");
               setIsProcessing(false);
-              // Convert base64 to Uint8Array and queue for playback
-              if (data.delta && audioQueueRef.current) {
+              
+              // Convert base64 to Uint8Array
+              if (data.delta) {
                 const binaryString = atob(data.delta);
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) {
                   bytes[i] = binaryString.charCodeAt(i);
                 }
-                audioQueueRef.current.addToQueue(bytes);
+                
+                // Send to Simli for lip-sync (primary)
+                if (simliSendAudioRef.current) {
+                  simliSendAudioRef.current(bytes);
+                }
+                
+                // Also queue for audio playback (Simli handles its own audio)
+                // Only use fallback if Simli is not available
+                if (!simliSendAudioRef.current && audioQueueRef.current) {
+                  audioQueueRef.current.addToQueue(bytes);
+                }
               }
               break;
 
@@ -320,5 +350,6 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     disconnect,
     startRecording,
     stopRecording,
+    setSimliAudioHandler,
   };
 };

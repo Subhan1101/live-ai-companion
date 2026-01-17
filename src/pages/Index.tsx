@@ -20,6 +20,7 @@ const Index = () => {
     disconnect,
     startRecording,
     stopRecording,
+    setSimliAudioHandler,
   } = useRealtimeChat();
 
   const [isCameraOn, setIsCameraOn] = useState(true);
@@ -44,6 +45,17 @@ const Index = () => {
       if (interval) clearInterval(interval);
     };
   }, [isConnected]);
+
+  const handleSimliReady = useCallback(
+    (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => {
+      setSimliAudioHandler(sendAudio, clearBuffer);
+      toast({
+        title: "Avatar Ready",
+        description: "Simli avatar is now active and ready for conversation.",
+      });
+    },
+    [setSimliAudioHandler]
+  );
 
   const handleMicPress = useCallback(() => {
     if (!isConnected) {
@@ -98,6 +110,7 @@ const Index = () => {
               onMicPress={handleMicPress}
               onMicRelease={handleMicRelease}
               audioLevel={audioLevel}
+              onSimliReady={handleSimliReady}
             />
           </div>
 
