@@ -1,68 +1,120 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff } from "lucide-react";
 
 interface VideoPanelProps {
   userName: string;
   isSpeaking: boolean;
   isMuted: boolean;
+  isCameraOn?: boolean;
 }
 
-export const VideoPanel = ({ userName, isSpeaking, isMuted }: VideoPanelProps) => {
+export const VideoPanel = ({ userName, isSpeaking, isMuted, isCameraOn = true }: VideoPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasVideo, setHasVideo] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [streamActive, setStreamActive] = useState(false);
+
+  // Get user initials for placeholder
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
 
   useEffect(() => {
+    let stream: MediaStream | null = null;
+
     const initCamera = async () => {
+      if (!isCameraOn) {
+        setHasVideo(false);
+        setStreamActive(false);
+        return;
+      }
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        console.log("Requesting camera access...");
+        stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user", width: 640, height: 480 },
           audio: false,
         });
+        
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          setHasVideo(true);
+          // Wait for video to be ready
+          videoRef.current.onloadedmetadata = () => {
+            console.log("Video metadata loaded");
+            setHasVideo(true);
+            setStreamActive(true);
+            setError(null);
+          };
         }
       } catch (err) {
         console.error("Camera access error:", err);
         setError("Camera access denied");
+        setHasVideo(false);
+        setStreamActive(false);
       }
     };
 
     initCamera();
 
     return () => {
-      if (videoRef.current?.srcObject) {
-        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-        tracks.forEach((track) => track.stop());
+      if (stream) {
+        stream.getTracks().forEach((track) => {
+          track.stop();
+          console.log("Camera track stopped");
+        });
       }
     };
-  }, []);
+  }, [isCameraOn]);
 
   return (
     <div className="panel-card flex flex-col h-full relative overflow-hidden">
       {/* Video display */}
-      <div className="flex-1 bg-gray-900 relative">
-        {hasVideo ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            {error ? (
-              <p className="text-white/60 text-center px-4">{error}</p>
-            ) : (
-              <div className="animate-pulse text-white/60">Loading camera...</div>
-            )}
+      <div className="flex-1 bg-[#1a1f2e] relative flex items-center justify-center">
+        {/* Always render video element */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className={`w-full h-full object-cover absolute inset-0 ${
+            hasVideo && isCameraOn ? "opacity-100" : "opacity-0"
+          }`}
+        />
+        
+        {/* Placeholder when no video */}
+        {(!hasVideo || !isCameraOn) && (
+          <div className="flex flex-col items-center justify-center gap-4">
+            {/* User avatar circle */}
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-3xl font-bold">
+              {getInitials(userName)}
+            </div>
+            
+            {/* Status message */}
+            <div className="text-white/60 text-sm text-center">
+              {error ? (
+                <span className="flex items-center gap-2">
+                  <VideoOff className="w-4 h-4" />
+                  {error}
+                </span>
+              ) : !isCameraOn ? (
+                <span className="flex items-center gap-2">
+                  <VideoOff className="w-4 h-4" />
+                  Camera off
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <Video className="w-4 h-4 animate-pulse" />
+                  Starting camera...
+                </span>
+              )}
+            </div>
           </div>
         )}
-        
-        {/* Hidden video element for fallback */}
-        {!hasVideo && <video ref={videoRef} autoPlay playsInline muted className="hidden" />}
       </div>
 
       {/* Bottom info bar */}

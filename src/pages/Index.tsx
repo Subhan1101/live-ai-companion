@@ -120,6 +120,7 @@ const Index = () => {
               userName="Jack Jackson"
               isSpeaking={isRecording}
               isMuted={!isMicOn}
+              isCameraOn={isCameraOn}
             />
           </div>
 
