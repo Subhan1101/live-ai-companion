@@ -42,6 +42,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const audioQueueRef = useRef<AudioQueue | null>(null);
   const audioLevelIntervalRef = useRef<number | null>(null);
   const sessionCreatedRef = useRef(false);
+  const isListeningRef = useRef(false);
   
   // Simli audio handlers
   const simliSendAudioRef = useRef<((data: Uint8Array) => void) | null>(null);
@@ -118,7 +119,11 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               break;
 
             case "session.updated":
-              console.log("Session updated successfully");
+              console.log("Session updated successfully - starting auto-listen mode");
+              // Automatically start listening after session is configured
+              if (!isListeningRef.current) {
+                startAutoListening();
+              }
               break;
 
             case "input_audio_buffer.speech_started":
@@ -244,6 +249,8 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   }, []);
 
   const disconnect = useCallback(() => {
+    isListeningRef.current = false;
+    
     if (recorderRef.current) {
       recorderRef.current.stop();
       recorderRef.current = null;
@@ -271,15 +278,17 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     setStatus("idle");
   }, []);
 
-  const startRecording = useCallback(async () => {
-    if (!wsRef.current || !isConnected) {
-      console.log("Not connected, cannot start recording");
+  // Auto-listen function that starts after session is configured
+  const startAutoListening = useCallback(async () => {
+    if (isListeningRef.current) {
+      console.log("Already listening");
       return;
     }
-
-    console.log("Starting recording...");
+    
+    console.log("Starting auto-listen mode...");
+    isListeningRef.current = true;
     setIsRecording(true);
-    setStatus("listening");
+    setStatus("idle");
 
     const recorder = new AudioRecorder((audioData) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -297,6 +306,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
 
     try {
       await recorder.start();
+      console.log("Auto-listen mode active - speak anytime!");
 
       // Update audio level periodically
       audioLevelIntervalRef.current = window.setInterval(() => {
@@ -305,14 +315,31 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
         }
       }, 100);
     } catch (error) {
-      console.error("Failed to start recording:", error);
+      console.error("Failed to start auto-listening:", error);
+      isListeningRef.current = false;
       setIsRecording(false);
       setStatus("idle");
     }
-  }, [isConnected]);
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    // With auto-listen mode, this is already handled
+    if (isListeningRef.current) {
+      console.log("Already in auto-listen mode");
+      return;
+    }
+    
+    if (!wsRef.current || !isConnected) {
+      console.log("Not connected, cannot start recording");
+      return;
+    }
+
+    await startAutoListening();
+  }, [isConnected, startAutoListening]);
 
   const stopRecording = useCallback(() => {
     console.log("Stopping recording...");
+    isListeningRef.current = false;
 
     if (audioLevelIntervalRef.current) {
       clearInterval(audioLevelIntervalRef.current);
@@ -326,15 +353,6 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
 
     setIsRecording(false);
     setAudioLevel(0);
-
-    // Commit the audio buffer
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "input_audio_buffer.commit",
-        })
-      );
-    }
   }, []);
 
   return {

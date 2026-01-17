@@ -162,13 +162,13 @@ export const AvatarPanel = ({
   const getStatusText = () => {
     switch (status) {
       case "listening":
-        return "Listening";
+        return "Listening...";
       case "speaking":
         return "Speaking";
       case "processing":
         return "Thinking...";
       default:
-        return isSimliReady ? "Ready" : "Loading...";
+        return isSimliReady ? "Say something!" : "Loading...";
     }
   };
 
@@ -209,23 +209,20 @@ export const AvatarPanel = ({
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-2">
             <h2 className="text-2xl font-display font-bold text-white drop-shadow-md">{AVATAR_NAME}</h2>
-            <div className={`status-badge ${isListening ? "status-listening" : "status-speaking"}`}>
+            <div className={`status-badge ${isListening ? "status-listening" : status === "speaking" ? "status-speaking" : ""}`}>
               {getStatusText()}
-              {isListening && <WaveformVisualizer audioLevel={audioLevel} isActive={isListening} />}
+              {(isListening || status === "speaking") && <WaveformVisualizer audioLevel={status === "speaking" ? 50 : audioLevel} isActive={isListening || status === "speaking"} />}
             </div>
           </div>
 
-          {/* Push-to-talk button */}
-          <button
-            className="mic-button"
-            onMouseDown={onMicPress}
-            onMouseUp={onMicRelease}
-            onMouseLeave={onMicRelease}
-            onTouchStart={onMicPress}
-            onTouchEnd={onMicRelease}
-          >
-            <Mic className={`w-6 h-6 ${isRecording ? "animate-pulse" : ""}`} />
-          </button>
+          {/* Mic indicator - shows when listening */}
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+            isRecording 
+              ? "bg-status-listening/20 border-2 border-status-listening" 
+              : "bg-white/10 border-2 border-white/20"
+          }`}>
+            <Mic className={`w-6 h-6 text-white ${isRecording ? "animate-pulse" : ""}`} />
+          </div>
         </div>
       </div>
     </div>
