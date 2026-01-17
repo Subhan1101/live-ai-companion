@@ -2,95 +2,124 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Nunito:wght@600;700;800&display=swap');
+
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
 All colors MUST be HSL.
 */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Main background - soft light blue */
+    --background: 210 40% 96%;
+    --foreground: 222 47% 11%;
 
+    /* Cards - white */
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 222 47% 11%;
 
+    /* Popover */
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 222 47% 11%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Primary - warm amber/orange for avatar section */
+    --primary: 36 100% 50%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* Secondary - soft blue for accents */
+    --secondary: 210 100% 56%;
+    --secondary-foreground: 0 0% 100%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    /* Avatar background - warm golden yellow */
+    --avatar-bg: 40 100% 60%;
+    --avatar-bg-light: 45 100% 70%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    /* Status colors */
+    --status-listening: 210 100% 56%;
+    --status-speaking: 142 76% 36%;
+    --status-error: 0 84% 60%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    /* Muted */
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    /* Accent */
+    --accent: 40 100% 95%;
+    --accent-foreground: 36 100% 40%;
 
-    --radius: 0.5rem;
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
 
+    /* Borders */
+    --border: 40 40% 88%;
+    --input: 214 32% 91%;
+    --ring: 36 100% 50%;
+
+    --radius: 1rem;
+
+    /* Shadows */
+    --shadow-card: 0 4px 20px -2px hsl(40 30% 50% / 0.15);
+    --shadow-button: 0 4px 12px -2px hsl(210 100% 56% / 0.3);
+
+    /* Sidebar */
     --sidebar-background: 0 0% 98%;
-
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
+    --sidebar-foreground: 240 5% 26%;
+    --sidebar-primary: 240 6% 10%;
     --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
+    --sidebar-accent: 240 5% 96%;
+    --sidebar-accent-foreground: 240 6% 10%;
     --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-ring: 217 91% 60%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    --background: 222 47% 8%;
     --foreground: 210 40% 98%;
 
-    --card: 222.2 84% 4.9%;
+    --card: 222 47% 11%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222.2 84% 4.9%;
+    --popover: 222 47% 11%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 36 100% 50%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 210 100% 56%;
+    --secondary-foreground: 0 0% 100%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --avatar-bg: 40 100% 55%;
+    --avatar-bg-light: 45 100% 65%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --status-listening: 210 100% 56%;
+    --status-speaking: 142 76% 36%;
+    --status-error: 0 84% 60%;
 
-    --destructive: 0 62.8% 30.6%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 40 50% 15%;
+    --accent-foreground: 40 100% 70%;
+
+    --destructive: 0 63% 31%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 36 100% 50%;
+
+    --shadow-card: 0 4px 20px -2px hsl(0 0% 0% / 0.3);
+    --shadow-button: 0 4px 12px -2px hsl(210 100% 56% / 0.4);
+
+    --sidebar-background: 240 6% 10%;
+    --sidebar-foreground: 240 5% 96%;
+    --sidebar-primary: 224 76% 48%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-accent: 240 4% 16%;
+    --sidebar-accent-foreground: 240 5% 96%;
+    --sidebar-border: 240 4% 16%;
+    --sidebar-ring: 217 91% 60%;
   }
 }
 
@@ -100,6 +129,79 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Nunito', sans-serif;
+  }
+}
+
+@layer components {
+  .panel-card {
+    @apply bg-card rounded-2xl overflow-hidden;
+    box-shadow: var(--shadow-card);
+  }
+
+  .avatar-panel {
+    background: linear-gradient(180deg, hsl(var(--avatar-bg)) 0%, hsl(var(--avatar-bg-light)) 100%);
+  }
+
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium;
+  }
+
+  .status-listening {
+    @apply bg-white/90 text-[hsl(var(--status-listening))];
+  }
+
+  .status-speaking {
+    @apply bg-white/90 text-[hsl(var(--status-speaking))];
+  }
+
+  .control-button {
+    @apply w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200;
+    @apply bg-card hover:bg-muted shadow-md hover:shadow-lg;
+  }
+
+  .control-button-active {
+    @apply bg-secondary text-secondary-foreground;
+    box-shadow: var(--shadow-button);
+  }
+
+  .control-button-danger {
+    @apply bg-destructive text-destructive-foreground hover:bg-destructive/90;
+  }
+
+  .mic-button {
+    @apply w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200;
+    @apply bg-secondary text-secondary-foreground;
+    box-shadow: var(--shadow-button);
+  }
+
+  .mic-button:hover {
+    @apply scale-105;
+  }
+
+  .mic-button:active {
+    @apply scale-95;
+  }
+
+  .transcript-bubble {
+    @apply p-4 rounded-2xl max-w-[90%];
+  }
+
+  .transcript-bubble-ai {
+    @apply bg-accent text-accent-foreground rounded-tl-sm;
+  }
+
+  .transcript-bubble-user {
+    @apply bg-card text-card-foreground rounded-tr-sm ml-auto;
+    box-shadow: 0 2px 8px -2px hsl(0 0% 0% / 0.1);
+  }
+
+  .waveform-bar {
+    @apply w-1 bg-white/80 rounded-full transition-all duration-100;
   }
 }
