@@ -53,8 +53,16 @@ export const AvatarPanel = ({
 
   // Initialize Simli client
   useEffect(() => {
+    let isMounted = true;
+    
     const initSimli = async () => {
       try {
+        // Close any existing session first
+        if (simliClientRef.current) {
+          simliClientRef.current.close();
+          simliClientRef.current = null;
+        }
+        
         console.log("Initializing Simli with face:", AVATAR_FACE_ID);
         
         // Fetch API key from edge function
@@ -78,9 +86,12 @@ export const AvatarPanel = ({
           return;
         }
 
+        if (!isMounted) return;
+
+        // Create a fresh Simli client instance
         const simliClient = new SimliClient();
         
-        // Pass the actual elements, not the refs
+        // Initialize with the correct face ID
         simliClient.Initialize({
           apiKey: apiKey,
           faceID: AVATAR_FACE_ID,
@@ -103,7 +114,12 @@ export const AvatarPanel = ({
         // Start the Simli session
         await simliClient.start();
         
-        console.log("Simli client started successfully");
+        if (!isMounted) {
+          simliClient.close();
+          return;
+        }
+        
+        console.log("Simli client started successfully with face:", AVATAR_FACE_ID);
         setIsSimliReady(true);
         setSimliError(null);
 
@@ -124,7 +140,9 @@ export const AvatarPanel = ({
         }
       } catch (error) {
         console.error("Simli initialization error:", error);
-        setSimliError(error instanceof Error ? error.message : "Failed to initialize avatar");
+        if (isMounted) {
+          setSimliError(error instanceof Error ? error.message : "Failed to initialize avatar");
+        }
       }
     };
 
@@ -132,13 +150,14 @@ export const AvatarPanel = ({
     const timer = setTimeout(initSimli, 500);
 
     return () => {
+      isMounted = false;
       clearTimeout(timer);
       if (simliClientRef.current) {
         simliClientRef.current.close();
         simliClientRef.current = null;
       }
     };
-  }, [onSimliReady]);
+  }, []);
 
   const getStatusText = () => {
     switch (status) {
