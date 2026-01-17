@@ -140,6 +140,17 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               console.log("Speech stopped");
               setStatus("processing");
               setIsProcessing(true);
+              // Trigger the assistant response after server VAD detects end-of-turn
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "response.create" }));
+              }
+              break;
+
+            case "conversation.item.input_audio_transcription.delta":
+              // Live partial transcription while the user is speaking
+              if (typeof data.delta === "string") {
+                setPartialTranscript((prev) => prev + data.delta);
+              }
               break;
 
             case "conversation.item.input_audio_transcription.completed":
@@ -238,10 +249,13 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
         console.error("WebSocket error:", error);
       };
 
-      ws.onclose = () => {
-        console.log("WebSocket closed");
+      ws.onclose = (event) => {
+        console.log("WebSocket closed", { code: event.code, reason: event.reason, wasClean: event.wasClean });
         setIsConnected(false);
         sessionCreatedRef.current = false;
+        isListeningRef.current = false;
+        setIsRecording(false);
+        setStatus("idle");
       };
     } catch (error) {
       console.error("Connection error:", error);

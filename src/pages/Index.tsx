@@ -71,7 +71,28 @@ const Index = () => {
   };
 
   const handleToggleMic = () => {
-    setIsMicOn((prev) => !prev);
+    setIsMicOn((prev) => {
+      const next = !prev;
+
+      if (!isConnected) {
+        toast({
+          title: "Not connected",
+          description: "Please wait for the connection to be established.",
+          variant: "destructive",
+        });
+        return prev;
+      }
+
+      if (next) {
+        startRecording();
+        toast({ title: "Microphone on", description: "Listening enabled." });
+      } else {
+        stopRecording();
+        toast({ title: "Microphone off", description: "Listening paused." });
+      }
+
+      return next;
+    });
   };
 
   const handleShare = () => {
@@ -132,7 +153,7 @@ const Index = () => {
       <ControlBar
         isCameraOn={isCameraOn}
         isMicOn={isMicOn}
-        isRecording={isConnected}
+        isRecording={isRecording}
         recordingTime={recordingTime}
         onToggleCamera={handleToggleCamera}
         onToggleMic={handleToggleMic}
