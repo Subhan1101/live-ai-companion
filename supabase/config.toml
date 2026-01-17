@@ -2,3 +2,6 @@ project_id = "jvfvwysvhqpiosvhzhkf"
 
 [functions.realtime-chat]
 verify_jwt = false
+
+[functions.simli-token]
+verify_jwt = false
