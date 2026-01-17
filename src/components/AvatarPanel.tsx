@@ -1,6 +1,7 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Mic } from "lucide-react";
 import { SimliClient } from "simli-client";
+import { FaceSelector, SIMLI_PRESET_FACES } from "./FaceSelector";
 
 interface AvatarPanelProps {
   status: "idle" | "listening" | "speaking" | "processing";
@@ -33,8 +34,8 @@ const WaveformVisualizer = ({ audioLevel, isActive }: { audioLevel: number; isAc
   );
 };
 
-// Simli face ID - using a female avatar for Aria
-const SIMLI_FACE_ID = "5514e24d-6086-46a3-ace4-6a7264e5cb7c";
+// Default face
+const DEFAULT_FACE = SIMLI_PRESET_FACES.find(f => f.name === "Laila") || SIMLI_PRESET_FACES[0];
 
 export const AvatarPanel = ({
   status,
@@ -44,17 +45,32 @@ export const AvatarPanel = ({
   audioLevel,
   onSimliReady,
 }: AvatarPanelProps) => {
+  const [currentFaceId, setCurrentFaceId] = useState(DEFAULT_FACE.id);
+  const [currentFaceName, setCurrentFaceName] = useState(DEFAULT_FACE.name);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const simliClientRef = useRef<SimliClient | null>(null);
   const [isSimliReady, setIsSimliReady] = useState(false);
   const [simliError, setSimliError] = useState<string | null>(null);
 
+  // Handle face change - reinitialize Simli
+  const handleFaceChange = (faceId: string, name: string) => {
+    // Close current session
+    if (simliClientRef.current) {
+      simliClientRef.current.close();
+      simliClientRef.current = null;
+    }
+    setIsSimliReady(false);
+    setSimliError(null);
+    setCurrentFaceId(faceId);
+    setCurrentFaceName(name);
+  };
+
   // Initialize Simli client
   useEffect(() => {
     const initSimli = async () => {
       try {
-        console.log("Initializing Simli...");
+        console.log("Initializing Simli with face:", currentFaceId);
         
         // Fetch API key from edge function
         const response = await fetch(
@@ -82,7 +98,7 @@ export const AvatarPanel = ({
         // Pass the actual elements, not the refs
         simliClient.Initialize({
           apiKey: apiKey,
-          faceID: SIMLI_FACE_ID,
+          faceID: currentFaceId,
           handleSilence: true,
           maxSessionLength: 3600,
           maxIdleTime: 600,
@@ -137,7 +153,7 @@ export const AvatarPanel = ({
         simliClientRef.current = null;
       }
     };
-  }, [onSimliReady]);
+  }, [onSimliReady, currentFaceId]);
 
   const getStatusText = () => {
     switch (status) {
@@ -188,7 +204,15 @@ export const AvatarPanel = ({
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/40 to-transparent">
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-2">
-            <h2 className="text-2xl font-display font-bold text-white drop-shadow-md">Aria</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-2xl font-display font-bold text-white drop-shadow-md">{currentFaceName}</h2>
+              <FaceSelector
+                currentFaceId={currentFaceId}
+                currentName={currentFaceName}
+                onFaceChange={handleFaceChange}
+                disabled={status === "speaking" || status === "processing"}
+              />
+            </div>
             <div className={`status-badge ${isListening ? "status-listening" : "status-speaking"}`}>
               {getStatusText()}
               {isListening && <WaveformVisualizer audioLevel={audioLevel} isActive={isListening} />}
