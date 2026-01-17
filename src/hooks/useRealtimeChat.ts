@@ -78,8 +78,8 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log("WebSocket connected");
-        setIsConnected(true);
+        console.log("WebSocket connected (backend proxy)");
+        // NOTE: don't mark connected until OpenAI confirms via proxy.openai_connected
       };
 
       ws.onmessage = async (event) => {
@@ -92,6 +92,27 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
           }
 
           switch (data.type) {
+            case "proxy.openai_connected":
+              console.log("Proxy connected to OpenAI Realtime");
+              setIsConnected(true);
+              break;
+
+            case "proxy.error":
+              console.error("Proxy error:", data);
+              setIsConnected(false);
+              setIsProcessing(false);
+              setIsSpeaking(false);
+              setStatus("idle");
+              break;
+
+            case "proxy.openai_closed":
+              console.error("OpenAI connection closed (via proxy):", data);
+              setIsConnected(false);
+              setIsProcessing(false);
+              setIsSpeaking(false);
+              setStatus("idle");
+              break;
+
             case "session.created":
               console.log("Session created, sending configuration with Whisper-1 STT...");
               sessionCreatedRef.current = true;

@@ -2,9 +2,9 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
-// Use a GA Realtime model by default (the old 2024-10-01 snapshot is deprecated)
-const OPENAI_REALTIME_MODEL = Deno.env.get("OPENAI_REALTIME_MODEL") ?? "gpt-realtime";
-const OPENAI_REALTIME_URL = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(OPENAI_REALTIME_MODEL)}`;
+// IMPORTANT: Use the exact Realtime endpoint required by the app
+const OPENAI_REALTIME_URL =
+  "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01";
 
 serve(async (req) => {
   // Handle WebSocket upgrade
@@ -34,11 +34,9 @@ serve(async (req) => {
     ]);
 
     openaiSocket.onopen = () => {
-      console.log("Connected to OpenAI Realtime API", { model: OPENAI_REALTIME_MODEL });
+      console.log("Connected to OpenAI Realtime API", { url: OPENAI_REALTIME_URL });
       if (clientSocket.readyState === WebSocket.OPEN) {
-        clientSocket.send(
-          JSON.stringify({ type: "proxy.openai_connected", model: OPENAI_REALTIME_MODEL })
-        );
+        clientSocket.send(JSON.stringify({ type: "proxy.openai_connected" }));
       }
     };
 
@@ -66,7 +64,6 @@ serve(async (req) => {
             type: "proxy.openai_closed",
             code: event.code,
             reason: event.reason,
-            model: OPENAI_REALTIME_MODEL,
           })
         );
         clientSocket.close();
