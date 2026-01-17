@@ -85,13 +85,18 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
       ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log("Received message:", data.type);
+          
+          // Log all message types for debugging
+          if (data.type !== "response.audio.delta") {
+            console.log("Received:", data.type, data);
+          }
 
           switch (data.type) {
             case "session.created":
-              console.log("Session created, sending configuration...");
+              console.log("Session created, sending configuration with Whisper-1 STT...");
               sessionCreatedRef.current = true;
               // Send session configuration after session is created
+              // Using OpenAI Realtime API with Whisper-1 for STT and built-in TTS
               ws.send(
                 JSON.stringify({
                   type: "session.update",
@@ -110,6 +115,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
                       threshold: 0.5,
                       prefix_padding_ms: 300,
                       silence_duration_ms: 800,
+                      create_response: true,
                     },
                     temperature: 0.8,
                     max_response_output_tokens: "inf",
@@ -119,7 +125,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               break;
 
             case "session.updated":
-              console.log("Session updated successfully - starting auto-listen mode");
+              console.log("Session configured with Whisper-1 STT - starting auto-listen mode");
               // Automatically start listening after session is configured
               if (!isListeningRef.current) {
                 startAutoListening();
@@ -137,24 +143,31 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               break;
 
             case "input_audio_buffer.speech_stopped":
-              console.log("Speech stopped");
+              console.log("Speech stopped - server VAD detected end of speech");
               setStatus("processing");
               setIsProcessing(true);
-              // Trigger the assistant response after server VAD detects end-of-turn
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "response.create" }));
-              }
+              // With server_vad, OpenAI automatically commits the buffer and creates a response
+              // No need to manually send response.create
+              break;
+
+            case "input_audio_buffer.committed":
+              console.log("Audio buffer committed - waiting for transcription");
+              break;
+
+            case "conversation.item.created":
+              console.log("Conversation item created:", data.item?.type);
               break;
 
             case "conversation.item.input_audio_transcription.delta":
-              // Live partial transcription while the user is speaking
+              // Live partial transcription while the user is speaking (Whisper-1 STT)
+              console.log("Live STT delta:", data.delta);
               if (typeof data.delta === "string") {
                 setPartialTranscript((prev) => prev + data.delta);
               }
               break;
 
             case "conversation.item.input_audio_transcription.completed":
-              console.log("User transcript:", data.transcript);
+              console.log("Whisper-1 STT complete:", data.transcript);
               if (data.transcript) {
                 const userMessage: Message = {
                   id: crypto.randomUUID(),
@@ -167,13 +180,23 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               }
               break;
 
+            case "conversation.item.input_audio_transcription.failed":
+              console.error("STT transcription failed:", data.error);
+              setPartialTranscript("");
+              break;
+
             case "response.created":
-              console.log("Response started");
+              console.log("AI response started - TTS will follow");
               setIsProcessing(true);
               setStatus("processing");
               break;
 
+            case "response.output_item.added":
+              console.log("Response output item added:", data.item?.type);
+              break;
+
             case "response.audio.delta":
+              // TTS audio from OpenAI Realtime API
               setIsSpeaking(true);
               setStatus("speaking");
               setIsProcessing(false);
@@ -191,8 +214,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
                   simliSendAudioRef.current(bytes);
                 }
                 
-                // Also queue for audio playback (Simli handles its own audio)
-                // Only use fallback if Simli is not available
+                // Use fallback audio queue if Simli is not available
                 if (!simliSendAudioRef.current && audioQueueRef.current) {
                   audioQueueRef.current.addToQueue(bytes);
                 }
@@ -200,7 +222,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               break;
 
             case "response.audio_transcript.delta":
-              // Accumulate assistant transcript
+              // Live TTS transcript from OpenAI
               if (data.delta) {
                 setMessages((prev) => {
                   const last = prev[prev.length - 1];
@@ -222,23 +244,38 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               }
               break;
 
+            case "response.audio_transcript.done":
+              console.log("TTS transcript complete");
+              break;
+
             case "response.audio.done":
-              console.log("Audio response complete");
+              console.log("TTS audio stream complete");
+              break;
+
+            case "response.output_item.done":
+              console.log("Response output item complete");
               break;
 
             case "response.done":
-              console.log("Response complete");
+              console.log("Full response complete");
               setIsSpeaking(false);
               setIsProcessing(false);
               setStatus("idle");
               break;
 
+            case "rate_limits.updated":
+              console.log("Rate limits:", data.rate_limits);
+              break;
+
             case "error":
-              console.error("API Error:", data.error);
+              console.error("OpenAI Realtime API Error:", data.error);
               setIsProcessing(false);
               setIsSpeaking(false);
               setStatus("idle");
               break;
+
+            default:
+              console.log("Unhandled event type:", data.type);
           }
         } catch (e) {
           console.error("Error parsing message:", e);
