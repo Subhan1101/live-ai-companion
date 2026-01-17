@@ -175,7 +175,7 @@ All colors MUST be HSL.
   }
 
   .control-button-success {
-    @apply bg-[hsl(var(--status-speaking))] text-white hover:bg-[hsl(var(--status-speaking))]/90;
+    @apply bg-[hsl(var(--status-speaking))] text-primary-foreground hover:bg-[hsl(var(--status-speaking))]/90;
   }
 
   .mic-button {
