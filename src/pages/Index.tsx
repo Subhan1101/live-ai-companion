@@ -84,6 +84,24 @@ const Index = () => {
   };
 
   const handleToggleMic = () => {
+    // If the UI says mic is ON but we're not actually recording (common when the browser
+    // blocked the initial mic permission because it wasn't triggered by a click),
+    // treat this click as "try to enable mic".
+    if (isMicOn && !isRecording) {
+      if (!isConnected) {
+        toast({
+          title: "Not connected",
+          description: "Please wait for the connection to be established.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      startRecording();
+      toast({ title: "Microphone on", description: "Listening enabled." });
+      return;
+    }
+
     setIsMicOn((prev) => {
       const next = !prev;
 
