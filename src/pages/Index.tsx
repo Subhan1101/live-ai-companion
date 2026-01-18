@@ -236,6 +236,7 @@ const Index = () => {
               messages={messages}
               partialTranscript={partialTranscript}
               isProcessing={isProcessing}
+              onUploadClick={() => setShowFileUpload(true)}
             />
           </div>
         </div>
@@ -272,7 +273,6 @@ const Index = () => {
         onToggleMic={handleToggleMic}
         onShare={handleShare}
         onCaptureScreen={handleCaptureScreen}
-        onToggleFileUpload={() => setShowFileUpload(true)}
         onToggleCall={handleToggleCall}
       />
 

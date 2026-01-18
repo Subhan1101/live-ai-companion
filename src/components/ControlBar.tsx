@@ -1,4 +1,4 @@
-import { Video, Mic, MonitorUp, Phone, PhoneOff, Circle, Camera, Upload, MonitorOff } from "lucide-react";
+import { Video, Mic, MonitorUp, Phone, PhoneOff, Circle, Camera, MonitorOff } from "lucide-react";
 
 interface ControlBarProps {
   isCameraOn: boolean;
@@ -11,7 +11,6 @@ interface ControlBarProps {
   onToggleMic: () => void;
   onShare: () => void;
   onCaptureScreen: () => void;
-  onToggleFileUpload: () => void;
   onToggleCall: () => void;
 }
 
@@ -33,7 +32,6 @@ export const ControlBar = ({
   onToggleMic,
   onShare,
   onCaptureScreen,
-  onToggleFileUpload,
   onToggleCall,
 }: ControlBarProps) => {
   return (
@@ -91,18 +89,6 @@ export const ControlBar = ({
             <span className="text-xs text-muted-foreground mt-1">Capture</span>
           </div>
         )}
-
-        {/* File upload button */}
-        <div className="flex flex-col items-center">
-          <button 
-            onClick={onToggleFileUpload} 
-            className="control-button"
-            title="Upload a file for Aria to analyze"
-          >
-            <Upload className="w-5 h-5" />
-          </button>
-          <span className="text-xs text-muted-foreground mt-1">Upload</span>
-        </div>
 
         {/* Call toggle button */}
         <div className="flex flex-col items-center ml-2">
