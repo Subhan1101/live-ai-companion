@@ -3,7 +3,7 @@ import { Mic } from "lucide-react";
 import { SimliClient } from "simli-client";
 
 // Fixed avatar configuration
-const AVATAR_FACE_ID = "5badeb21-e905-413e-8920-b543bcce6548";
+const AVATAR_FACE_ID = "5fc23ea5-8175-4a82-aaaf-cdd8c88543dc";
 const AVATAR_NAME = "Aria";
 
 interface AvatarPanelProps {
