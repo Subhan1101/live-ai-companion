@@ -21,7 +21,7 @@ const getOpenAIApiKey = () => {
 
 // IMPORTANT: Use the exact Realtime endpoint required by the app
 const OPENAI_REALTIME_URL =
-  "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01";
+  "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
 
 serve(async (req) => {
   // Handle WebSocket upgrade
