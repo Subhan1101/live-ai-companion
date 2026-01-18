@@ -122,10 +122,10 @@ const Index = () => {
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Main content area */}
-      <div className="flex-1 p-4 lg:p-6 min-h-0">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 h-full max-w-[1800px] mx-auto">
+      <div className="flex-1 p-4 lg:p-6 overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 h-full max-w-[1800px] mx-auto overflow-hidden">
           {/* Avatar Panel - Left */}
-          <div className="lg:col-span-4 h-[400px] lg:h-full">
+          <div className="lg:col-span-4 h-full min-h-0 overflow-hidden">
             <AvatarPanel
               status={status}
               isRecording={isRecording}
@@ -137,7 +137,7 @@ const Index = () => {
           </div>
 
           {/* Video Panel - Center */}
-          <div className="lg:col-span-4 h-[400px] lg:h-full">
+          <div className="lg:col-span-4 h-full min-h-0 overflow-hidden">
             <VideoPanel
               userName="Jack Jackson"
               isSpeaking={isRecording}
@@ -147,7 +147,7 @@ const Index = () => {
           </div>
 
           {/* Transcript Panel - Right */}
-          <div className="lg:col-span-4 h-[400px] lg:h-full">
+          <div className="lg:col-span-4 h-full min-h-0 overflow-hidden">
             <TranscriptPanel
               messages={messages}
               partialTranscript={partialTranscript}

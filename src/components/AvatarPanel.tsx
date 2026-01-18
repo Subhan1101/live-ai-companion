@@ -177,18 +177,20 @@ export const AvatarPanel = ({
   return (
     <div className="panel-card avatar-panel flex flex-col h-full relative overflow-hidden">
       {/* Simli Avatar Video */}
-      <div className="flex-1 flex items-center justify-center relative">
+      <div className="absolute inset-0 flex items-center justify-center">
         <video
           ref={videoRef}
           autoPlay
           playsInline
-          className={`w-full h-full object-cover ${isSimliReady ? "opacity-100" : "opacity-0"}`}
+          muted={false}
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${isSimliReady ? "opacity-100" : "opacity-0"}`}
+          style={{ objectFit: 'cover' }}
         />
         <audio ref={audioRef} autoPlay className="hidden" />
         
         {/* Loading/Error state overlay */}
         {!isSimliReady && (
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-amber-400 to-orange-500">
             {simliError ? (
               <div className="text-center p-4">
                 <div className="text-6xl mb-4">🤖</div>
