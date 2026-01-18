@@ -1,4 +1,6 @@
 // Audio recording utilities for OpenAI Realtime API
+// Target sample rate for OpenAI Realtime API
+const TARGET_SAMPLE_RATE = 24000;
 
 export class AudioRecorder {
   private stream: MediaStream | null = null;
@@ -7,14 +9,17 @@ export class AudioRecorder {
   private source: MediaStreamAudioSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
   private gain: GainNode | null = null;
+  private resampleRatio: number = 1;
+  private resampleBuffer: Float32Array = new Float32Array(0);
+  private resampleOffset: number = 0;
 
   constructor(private onAudioData: (audioData: Float32Array) => void) {}
 
   async start() {
     try {
+      // Request audio with preferred settings, but browser may use different sample rate
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 24000,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
@@ -22,13 +27,18 @@ export class AudioRecorder {
         },
       });
 
-      this.audioContext = new AudioContext({ sampleRate: 24000 });
-
+      // Create AudioContext - let browser choose its native sample rate first
+      this.audioContext = new AudioContext();
+      
       // Some browsers keep AudioContext suspended until a user gesture.
-      // Resuming here improves reliability when recording starts from a click.
       if (this.audioContext.state === "suspended") {
         await this.audioContext.resume();
       }
+
+      const nativeSampleRate = this.audioContext.sampleRate;
+      this.resampleRatio = nativeSampleRate / TARGET_SAMPLE_RATE;
+      
+      console.log(`AudioRecorder: Native sample rate ${nativeSampleRate}Hz, target ${TARGET_SAMPLE_RATE}Hz, ratio ${this.resampleRatio.toFixed(3)}`);
 
       this.source = this.audioContext.createMediaStreamSource(this.stream);
       this.analyser = this.audioContext.createAnalyser();
@@ -41,7 +51,16 @@ export class AudioRecorder {
       this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
       this.processor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
-        this.onAudioData(new Float32Array(inputData));
+        
+        // Resample to 24kHz if needed
+        if (this.resampleRatio !== 1) {
+          const resampled = this.resampleAudio(inputData);
+          if (resampled.length > 0) {
+            this.onAudioData(resampled);
+          }
+        } else {
+          this.onAudioData(new Float32Array(inputData));
+        }
       };
 
       this.source.connect(this.analyser);
@@ -49,11 +68,31 @@ export class AudioRecorder {
       this.processor.connect(this.gain);
       this.gain.connect(this.audioContext.destination);
 
-      console.log("AudioRecorder started");
+      console.log("AudioRecorder started with resampling enabled");
     } catch (error) {
       console.error("Error accessing microphone:", error);
       throw error;
     }
+  }
+
+  // Linear interpolation resampling from native rate to 24kHz
+  private resampleAudio(input: Float32Array): Float32Array {
+    const outputLength = Math.floor(input.length / this.resampleRatio);
+    if (outputLength === 0) return new Float32Array(0);
+    
+    const output = new Float32Array(outputLength);
+    
+    for (let i = 0; i < outputLength; i++) {
+      const srcIndex = i * this.resampleRatio;
+      const srcIndexFloor = Math.floor(srcIndex);
+      const srcIndexCeil = Math.min(srcIndexFloor + 1, input.length - 1);
+      const fraction = srcIndex - srcIndexFloor;
+      
+      // Linear interpolation between samples
+      output[i] = input[srcIndexFloor] * (1 - fraction) + input[srcIndexCeil] * fraction;
+    }
+    
+    return output;
   }
 
   stop() {
@@ -81,6 +120,7 @@ export class AudioRecorder {
       this.audioContext.close();
       this.audioContext = null;
     }
+    this.resampleOffset = 0;
     console.log("AudioRecorder stopped");
   }
 
