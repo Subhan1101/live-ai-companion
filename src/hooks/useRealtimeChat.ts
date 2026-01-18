@@ -170,7 +170,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
                     modalities: ["text", "audio"],
                     instructions:
                       "You are Aria, a friendly, warm, and caring woman. Your name is Aria – when anyone asks your name, always say 'My name is Aria.' You speak with a gentle, feminine voice full of warmth and empathy. You help users by listening to them and providing supportive, thoughtful responses. Keep your responses conversational, natural, and expressive. You are kind, patient, and understanding. Your knowledge cutoff is 2024.",
-                    voice: "shimmer",
+                    voice: "nova",
                     input_audio_format: "pcm16",
                     output_audio_format: "pcm16",
                     input_audio_transcription: {
