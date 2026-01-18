@@ -6,6 +6,7 @@ export class AudioRecorder {
   private processor: ScriptProcessorNode | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
+  private gain: GainNode | null = null;
 
   constructor(private onAudioData: (audioData: Float32Array) => void) {}
 
@@ -22,9 +23,20 @@ export class AudioRecorder {
       });
 
       this.audioContext = new AudioContext({ sampleRate: 24000 });
+
+      // Some browsers keep AudioContext suspended until a user gesture.
+      // Resuming here improves reliability when recording starts from a click.
+      if (this.audioContext.state === "suspended") {
+        await this.audioContext.resume();
+      }
+
       this.source = this.audioContext.createMediaStreamSource(this.stream);
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 256;
+
+      // Keep processing graph alive without playing mic audio back to speakers.
+      this.gain = this.audioContext.createGain();
+      this.gain.gain.value = 0;
 
       this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
       this.processor.onaudioprocess = (e) => {
@@ -34,7 +46,8 @@ export class AudioRecorder {
 
       this.source.connect(this.analyser);
       this.analyser.connect(this.processor);
-      this.processor.connect(this.audioContext.destination);
+      this.processor.connect(this.gain);
+      this.gain.connect(this.audioContext.destination);
 
       console.log("AudioRecorder started");
     } catch (error) {
@@ -55,6 +68,10 @@ export class AudioRecorder {
     if (this.analyser) {
       this.analyser.disconnect();
       this.analyser = null;
+    }
+    if (this.gain) {
+      this.gain.disconnect();
+      this.gain = null;
     }
     if (this.stream) {
       this.stream.getTracks().forEach((track) => track.stop());
