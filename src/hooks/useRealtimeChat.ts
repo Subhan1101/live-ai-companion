@@ -58,8 +58,10 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const audioLevelIntervalRef = useRef<number | null>(null);
   const sessionCreatedRef = useRef(false);
   const isListeningRef = useRef(false);
-  // Queue of pending user message IDs waiting for transcription (FIFO order)
+  // Placeholder message IDs created on speech end, waiting to be associated with an OpenAI user item
   const pendingUserMessageIdsRef = useRef<string[]>([]);
+  // Map OpenAI user item_id -> local message.id so we can update the correct bubble later
+  const userItemToMessageIdRef = useRef<Map<string, string>>(new Map());
   
   // Simli audio handlers
   const simliSendAudioRef = useRef<((data: Uint8Array) => void) | null>(null);
@@ -242,11 +244,63 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               console.log("Audio buffer committed - waiting for transcription");
               break;
 
-            case "conversation.item.created":
-              console.log("Conversation item created:", data.item?.type);
-              break;
+            case "conversation.item.created": {
+              const item = data.item;
+              console.log("Conversation item created:", item?.type, item?.role);
 
-            case "conversation.item.input_audio_transcription.delta":
+              // When OpenAI creates the USER message item, associate it with the oldest placeholder
+              if (item?.role === "user" && typeof item?.id === "string") {
+                const pendingMsgId = pendingUserMessageIdsRef.current.shift();
+                console.log(
+                  "Associating user item to placeholder:",
+                  item.id,
+                  "->",
+                  pendingMsgId,
+                  "Remaining placeholders:",
+                  pendingUserMessageIdsRef.current.length
+                );
+
+                if (pendingMsgId) {
+                  userItemToMessageIdRef.current.set(item.id, pendingMsgId);
+
+                  // Some Realtime payloads include transcript on the item itself
+                  const maybeTranscript =
+                    item?.content?.find?.((c: any) => typeof c?.transcript === "string")?.transcript ??
+                    item?.content?.find?.((c: any) => typeof c?.text === "string")?.text;
+
+                    if (typeof maybeTranscript === "string" && maybeTranscript.trim().length > 0) {
+                      setMessages((prev) =>
+                        prev.map((m) => (m.id === pendingMsgId ? { ...m, content: maybeTranscript } : m))
+                      );
+                      userItemToMessageIdRef.current.delete(item.id);
+                    }
+                  }
+                }
+                break;
+              }
+
+              case "conversation.item.updated": {
+                const item = data.item;
+                // Some Realtime variants deliver the transcript on a later item.updated event
+                if (item?.role === "user" && typeof item?.id === "string") {
+                  const maybeTranscript =
+                    item?.content?.find?.((c: any) => typeof c?.transcript === "string")?.transcript ??
+                    item?.content?.find?.((c: any) => typeof c?.text === "string")?.text;
+
+                  const msgId = userItemToMessageIdRef.current.get(item.id);
+
+                  if (msgId && typeof maybeTranscript === "string" && maybeTranscript.trim().length > 0) {
+                    console.log("User item updated with transcript; updating message", item.id, "->", msgId);
+                    setMessages((prev) =>
+                      prev.map((m) => (m.id === msgId ? { ...m, content: maybeTranscript } : m))
+                    );
+                    userItemToMessageIdRef.current.delete(item.id);
+                  }
+                }
+                break;
+              }
+
+              case "conversation.item.input_audio_transcription.delta":
               // Live partial transcription while the user is speaking (Whisper-1 STT)
               console.log("Live STT delta:", data.delta);
               if (typeof data.delta === "string") {
@@ -254,25 +308,30 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               }
               break;
 
-            case "conversation.item.input_audio_transcription.completed":
-              console.log("Whisper-1 STT complete:", data.transcript);
-              if (data.transcript) {
-                // Pop the oldest pending message ID from the queue (FIFO)
-                const pendingMsgId = pendingUserMessageIdsRef.current.shift();
-                console.log("Popped pending message ID:", pendingMsgId, "Remaining queue:", pendingUserMessageIdsRef.current.length);
-                
-                if (pendingMsgId) {
-                  // Update the placeholder message with actual transcript
+            case "conversation.item.input_audio_transcription.completed": {
+              console.log("Whisper-1 STT complete:", data.transcript, "item_id:", data.item_id);
+              if (typeof data.transcript === "string" && data.transcript.trim().length > 0) {
+                const itemId = typeof data.item_id === "string" ? data.item_id : null;
+                const mappedMsgId = itemId ? userItemToMessageIdRef.current.get(itemId) : undefined;
+
+                // Fallback to FIFO placeholder if we don't have an item_id mapping
+                const msgIdToUpdate = mappedMsgId ?? pendingUserMessageIdsRef.current.shift();
+
+                console.log(
+                  "Updating user message:",
+                  { itemId, mappedMsgId, msgIdToUpdate },
+                  "Remaining placeholders:",
+                  pendingUserMessageIdsRef.current.length
+                );
+
+                if (msgIdToUpdate) {
                   setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === pendingMsgId
-                        ? { ...m, content: data.transcript }
-                        : m
-                    )
+                    prev.map((m) => (m.id === msgIdToUpdate ? { ...m, content: data.transcript } : m))
                   );
+
+                  if (itemId) userItemToMessageIdRef.current.delete(itemId);
                 } else {
-                  // Fallback: add new message if no placeholder exists
-                  console.log("No pending message ID found, creating new message");
+                  // Last-resort fallback
                   const userMessage: Message = {
                     id: crypto.randomUUID(),
                     role: "user",
@@ -281,9 +340,11 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
                   };
                   setMessages((prev) => [...prev, userMessage]);
                 }
+
                 setPartialTranscript("");
               }
               break;
+            }
 
             case "conversation.item.input_audio_transcription.failed":
               console.error("STT transcription failed:", data.error);
@@ -407,6 +468,10 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
 
   const disconnect = useCallback(() => {
     isListeningRef.current = false;
+
+    // Clear pending state
+    pendingUserMessageIdsRef.current = [];
+    userItemToMessageIdRef.current.clear();
     
     if (recorderRef.current) {
       recorderRef.current.stop();
