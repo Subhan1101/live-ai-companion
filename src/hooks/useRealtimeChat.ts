@@ -9,6 +9,17 @@ interface Message {
   timestamp: Date;
 }
 
+interface ImageContent {
+  type: "image";
+  base64: string;
+  mimeType: string;
+}
+
+interface TextContent {
+  type: "text";
+  text: string;
+}
+
 interface UseRealtimeChatReturn {
   messages: Message[];
   partialTranscript: string;
@@ -23,6 +34,8 @@ interface UseRealtimeChatReturn {
   startRecording: () => void;
   stopRecording: () => void;
   setSimliAudioHandler: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
+  sendImage: (base64: string, mimeType: string, prompt?: string) => void;
+  sendTextContent: (text: string, fileName?: string) => void;
 }
 
 const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
@@ -459,6 +472,108 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     setAudioLevel(0);
   }, []);
 
+  // Send image to AI for analysis (screen share or uploaded image)
+  const sendImage = useCallback((base64: string, mimeType: string, prompt?: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.log("Cannot send image: WebSocket not open");
+      return;
+    }
+
+    console.log("Sending image to AI for analysis...", { mimeType, sizeKB: Math.round((base64.length * 3) / 4 / 1024) });
+
+    // Create a conversation item with image content
+    const itemId = crypto.randomUUID();
+    wsRef.current.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          id: itemId,
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_image",
+              image: base64,
+            },
+            {
+              type: "input_text",
+              text: prompt || "Please analyze this image and describe what you see. If it's a problem or question, help me solve it.",
+            },
+          ],
+        },
+      })
+    );
+
+    // Trigger response
+    wsRef.current.send(
+      JSON.stringify({
+        type: "response.create",
+      })
+    );
+
+    // Add user message to display
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: itemId,
+        role: "user",
+        content: prompt || "[Shared image for analysis]",
+        timestamp: new Date(),
+      },
+    ]);
+  }, []);
+
+  // Send text content (from uploaded file)
+  const sendTextContent = useCallback((text: string, fileName?: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.log("Cannot send text: WebSocket not open");
+      return;
+    }
+
+    console.log("Sending text content to AI...", { fileName, length: text.length });
+
+    const prompt = fileName
+      ? `I've uploaded a file called "${fileName}". Here's its content:\n\n${text}\n\nPlease analyze this content and help me with any questions I have about it.`
+      : text;
+
+    // Create a conversation item with text
+    const itemId = crypto.randomUUID();
+    wsRef.current.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          id: itemId,
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: prompt,
+            },
+          ],
+        },
+      })
+    );
+
+    // Trigger response
+    wsRef.current.send(
+      JSON.stringify({
+        type: "response.create",
+      })
+    );
+
+    // Add user message to display
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: itemId,
+        role: "user",
+        content: fileName ? `[Uploaded file: ${fileName}]` : text.slice(0, 100) + "...",
+        timestamp: new Date(),
+      },
+    ]);
+  }, []);
+
   return {
     messages,
     partialTranscript,
@@ -473,5 +588,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     startRecording,
     stopRecording,
     setSimliAudioHandler,
+    sendImage,
+    sendTextContent,
   };
 };

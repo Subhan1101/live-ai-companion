@@ -1,14 +1,17 @@
-import { Video, Mic, MonitorUp, Phone, PhoneOff, Circle } from "lucide-react";
+import { Video, Mic, MonitorUp, Phone, PhoneOff, Circle, Camera, Upload, MonitorOff } from "lucide-react";
 
 interface ControlBarProps {
   isCameraOn: boolean;
   isMicOn: boolean;
   isRecording: boolean;
   isCallActive: boolean;
+  isScreenSharing: boolean;
   recordingTime: number;
   onToggleCamera: () => void;
   onToggleMic: () => void;
   onShare: () => void;
+  onCaptureScreen: () => void;
+  onToggleFileUpload: () => void;
   onToggleCall: () => void;
 }
 
@@ -24,10 +27,13 @@ export const ControlBar = ({
   isMicOn,
   isRecording,
   isCallActive,
+  isScreenSharing,
   recordingTime,
   onToggleCamera,
   onToggleMic,
   onShare,
+  onCaptureScreen,
+  onToggleFileUpload,
   onToggleCall,
 }: ControlBarProps) => {
   return (
@@ -41,36 +47,73 @@ export const ControlBar = ({
       </div>
 
       {/* Main controls */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={onToggleCamera}
-          className={`control-button ${isCameraOn ? "control-button-active" : ""}`}
-        >
-          <Video className="w-6 h-6" />
-        </button>
-        <span className="text-xs text-muted-foreground">Cam</span>
+      <div className="flex items-center gap-2">
+        <div className="flex flex-col items-center">
+          <button
+            onClick={onToggleCamera}
+            className={`control-button ${isCameraOn ? "control-button-active" : ""}`}
+          >
+            <Video className="w-5 h-5" />
+          </button>
+          <span className="text-xs text-muted-foreground mt-1">Cam</span>
+        </div>
 
-        <button
-          onClick={onToggleMic}
-          className={`control-button ${isMicOn ? "control-button-active" : ""}`}
-        >
-          <Mic className="w-6 h-6" />
-        </button>
-        <span className="text-xs text-muted-foreground">Mic</span>
+        <div className="flex flex-col items-center">
+          <button
+            onClick={onToggleMic}
+            className={`control-button ${isMicOn ? "control-button-active" : ""}`}
+          >
+            <Mic className="w-5 h-5" />
+          </button>
+          <span className="text-xs text-muted-foreground mt-1">Mic</span>
+        </div>
 
-        <button onClick={onShare} className="control-button">
-          <MonitorUp className="w-6 h-6" />
-        </button>
-        <span className="text-xs text-muted-foreground">Share</span>
+        <div className="flex flex-col items-center">
+          <button 
+            onClick={onShare} 
+            className={`control-button ${isScreenSharing ? "control-button-active" : ""}`}
+          >
+            {isScreenSharing ? <MonitorOff className="w-5 h-5" /> : <MonitorUp className="w-5 h-5" />}
+          </button>
+          <span className="text-xs text-muted-foreground mt-1">{isScreenSharing ? "Stop" : "Share"}</span>
+        </div>
+
+        {/* Capture screen button - only visible when sharing */}
+        {isScreenSharing && (
+          <div className="flex flex-col items-center">
+            <button 
+              onClick={onCaptureScreen} 
+              className="control-button control-button-active"
+              title="Send screenshot to Aria"
+            >
+              <Camera className="w-5 h-5" />
+            </button>
+            <span className="text-xs text-muted-foreground mt-1">Capture</span>
+          </div>
+        )}
+
+        {/* File upload button */}
+        <div className="flex flex-col items-center">
+          <button 
+            onClick={onToggleFileUpload} 
+            className="control-button"
+            title="Upload a file for Aria to analyze"
+          >
+            <Upload className="w-5 h-5" />
+          </button>
+          <span className="text-xs text-muted-foreground mt-1">Upload</span>
+        </div>
 
         {/* Call toggle button */}
-        <button 
-          onClick={onToggleCall} 
-          className={`control-button ${isCallActive ? "control-button-danger" : "control-button-success"}`}
-        >
-          {isCallActive ? <PhoneOff className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
-        </button>
-        <span className="text-xs text-muted-foreground">{isCallActive ? "End" : "Call"}</span>
+        <div className="flex flex-col items-center ml-2">
+          <button 
+            onClick={onToggleCall} 
+            className={`control-button ${isCallActive ? "control-button-danger" : "control-button-success"}`}
+          >
+            {isCallActive ? <PhoneOff className="w-5 h-5" /> : <Phone className="w-5 h-5" />}
+          </button>
+          <span className="text-xs text-muted-foreground mt-1">{isCallActive ? "End" : "Call"}</span>
+        </div>
       </div>
 
       {/* Right spacer for balance */}
