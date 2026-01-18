@@ -58,6 +58,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const audioLevelIntervalRef = useRef<number | null>(null);
   const sessionCreatedRef = useRef(false);
   const isListeningRef = useRef(false);
+  const pendingUserMessageIdRef = useRef<string | null>(null);
   
   // Simli audio handlers
   const simliSendAudioRef = useRef<((data: Uint8Array) => void) | null>(null);
@@ -218,8 +219,20 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               console.log("Speech stopped - server VAD detected end of speech");
               setStatus("processing");
               setIsProcessing(true);
-              // With server_vad, OpenAI automatically commits the buffer and creates a response
-              // No need to manually send response.create
+              
+              // Create placeholder user message immediately to ensure correct order
+              const pendingId = crypto.randomUUID();
+              pendingUserMessageIdRef.current = pendingId;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: pendingId,
+                  role: "user",
+                  content: "...", // Placeholder until transcription completes
+                  timestamp: new Date(),
+                },
+              ]);
+              setPartialTranscript("");
               break;
 
             case "input_audio_buffer.committed":
@@ -241,13 +254,26 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
             case "conversation.item.input_audio_transcription.completed":
               console.log("Whisper-1 STT complete:", data.transcript);
               if (data.transcript) {
-                const userMessage: Message = {
-                  id: crypto.randomUUID(),
-                  role: "user",
-                  content: data.transcript,
-                  timestamp: new Date(),
-                };
-                setMessages((prev) => [...prev, userMessage]);
+                // Update the placeholder message with actual transcript
+                if (pendingUserMessageIdRef.current) {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === pendingUserMessageIdRef.current
+                        ? { ...m, content: data.transcript }
+                        : m
+                    )
+                  );
+                  pendingUserMessageIdRef.current = null;
+                } else {
+                  // Fallback: add new message if no placeholder exists
+                  const userMessage: Message = {
+                    id: crypto.randomUUID(),
+                    role: "user",
+                    content: data.transcript,
+                    timestamp: new Date(),
+                  };
+                  setMessages((prev) => [...prev, userMessage]);
+                }
                 setPartialTranscript("");
               }
               break;
