@@ -121,7 +121,6 @@ export const VideoPanel = ({ userName, isSpeaking, isMuted, isCameraOn = true }:
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/60 to-transparent">
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-2">
-            <h2 className="text-2xl font-display font-bold text-white">{userName}</h2>
             <div className={`status-badge ${isSpeaking ? "status-speaking" : "bg-white/20 text-white"}`}>
               {isSpeaking ? "Speaking" : "Listening"}
               {isSpeaking && <Mic className="w-4 h-4" />}
