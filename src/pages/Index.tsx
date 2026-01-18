@@ -4,6 +4,7 @@ import VideoPanel from "@/components/VideoPanel";
 import TranscriptPanel from "@/components/TranscriptPanel";
 import ControlBar from "@/components/ControlBar";
 import FileUpload from "@/components/FileUpload";
+import VoiceSelector from "@/components/VoiceSelector";
 import { useRealtimeChat } from "@/hooks/useRealtimeChat";
 import { useScreenShare } from "@/hooks/useScreenShare";
 import { toast } from "@/hooks/use-toast";
@@ -18,6 +19,7 @@ const Index = () => {
     isSpeaking,
     audioLevel,
     status,
+    currentVoice,
     connect,
     disconnect,
     startRecording,
@@ -25,6 +27,7 @@ const Index = () => {
     setSimliAudioHandler,
     sendImage,
     sendTextContent,
+    changeVoice,
   } = useRealtimeChat();
 
   const {
@@ -304,8 +307,8 @@ const Index = () => {
         </div>
       )}
 
-      {/* Connection status indicator */}
-      <div className="fixed bottom-24 left-6">
+      {/* Connection status and voice selector */}
+      <div className="fixed bottom-24 left-6 flex items-center gap-4">
         <div className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-2 ${
           isConnected 
             ? "bg-status-speaking/20 text-status-speaking" 
@@ -314,6 +317,17 @@ const Index = () => {
           <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-status-speaking" : "bg-muted-foreground"}`} />
           {isConnected ? "Connected" : "Connecting..."}
         </div>
+        <VoiceSelector
+          currentVoice={currentVoice}
+          onVoiceChange={(voice) => {
+            changeVoice(voice);
+            toast({
+              title: "Voice changed",
+              description: `Aria will now speak with the ${voice} voice.`,
+            });
+          }}
+          disabled={!isConnected}
+        />
       </div>
     </div>
   );
