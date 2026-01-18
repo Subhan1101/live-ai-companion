@@ -58,7 +58,8 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const audioLevelIntervalRef = useRef<number | null>(null);
   const sessionCreatedRef = useRef(false);
   const isListeningRef = useRef(false);
-  const pendingUserMessageIdRef = useRef<string | null>(null);
+  // Queue of pending user message IDs waiting for transcription (FIFO order)
+  const pendingUserMessageIdsRef = useRef<string[]>([]);
   
   // Simli audio handlers
   const simliSendAudioRef = useRef<((data: Uint8Array) => void) | null>(null);
@@ -222,7 +223,9 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               
               // Create placeholder user message immediately to ensure correct order
               const pendingId = crypto.randomUUID();
-              pendingUserMessageIdRef.current = pendingId;
+              // Push to queue (FIFO) - will be popped when transcription completes
+              pendingUserMessageIdsRef.current.push(pendingId);
+              console.log("Added pending message ID to queue:", pendingId, "Queue length:", pendingUserMessageIdsRef.current.length);
               setMessages((prev) => [
                 ...prev,
                 {
@@ -254,18 +257,22 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
             case "conversation.item.input_audio_transcription.completed":
               console.log("Whisper-1 STT complete:", data.transcript);
               if (data.transcript) {
-                // Update the placeholder message with actual transcript
-                if (pendingUserMessageIdRef.current) {
+                // Pop the oldest pending message ID from the queue (FIFO)
+                const pendingMsgId = pendingUserMessageIdsRef.current.shift();
+                console.log("Popped pending message ID:", pendingMsgId, "Remaining queue:", pendingUserMessageIdsRef.current.length);
+                
+                if (pendingMsgId) {
+                  // Update the placeholder message with actual transcript
                   setMessages((prev) =>
                     prev.map((m) =>
-                      m.id === pendingUserMessageIdRef.current
+                      m.id === pendingMsgId
                         ? { ...m, content: data.transcript }
                         : m
                     )
                   );
-                  pendingUserMessageIdRef.current = null;
                 } else {
                   // Fallback: add new message if no placeholder exists
+                  console.log("No pending message ID found, creating new message");
                   const userMessage: Message = {
                     id: crypto.randomUUID(),
                     role: "user",
