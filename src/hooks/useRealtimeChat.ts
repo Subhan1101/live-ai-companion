@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AudioRecorder, encodeAudioForAPI, AudioQueue } from "@/lib/audioUtils";
+import { PCM16Resampler } from "@/lib/pcmResampler";
 import { toast } from "@/hooks/use-toast";
 
 interface Message {
@@ -61,6 +62,9 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   // Simli audio handlers
   const simliSendAudioRef = useRef<((data: Uint8Array) => void) | null>(null);
   const simliClearBufferRef = useRef<(() => void) | null>(null);
+  
+  // PCM16 resampler for Simli (24kHz -> 16kHz)
+  const resamplerRef = useRef<PCM16Resampler>(new PCM16Resampler(24000, 16000));
 
   // Set Simli audio handler from AvatarPanel
   const setSimliAudioHandler = useCallback(
@@ -206,6 +210,8 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               if (simliClearBufferRef.current) {
                 simliClearBufferRef.current();
               }
+              // Reset resampler state on interruption
+              resamplerRef.current.reset();
               break;
 
             case "input_audio_buffer.speech_stopped":
@@ -267,7 +273,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               setStatus("speaking");
               setIsProcessing(false);
               
-              // Convert base64 to Uint8Array
+              // Convert base64 to Uint8Array (24kHz PCM16)
               if (data.delta) {
                 const binaryString = atob(data.delta);
                 const bytes = new Uint8Array(binaryString.length);
@@ -275,12 +281,13 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
                   bytes[i] = binaryString.charCodeAt(i);
                 }
                 
-                // Send to Simli for lip-sync (primary)
+                // Send to Simli for lip-sync (primary) - resample 24kHz -> 16kHz
                 if (simliSendAudioRef.current) {
-                  simliSendAudioRef.current(bytes);
+                  const resampled = resamplerRef.current.process(bytes);
+                  simliSendAudioRef.current(resampled);
                 }
                 
-                // Use fallback audio queue if Simli is not available
+                // Use fallback audio queue if Simli is not available (keep at 24kHz)
                 if (!simliSendAudioRef.current && audioQueueRef.current) {
                   audioQueueRef.current.addToQueue(bytes);
                 }
