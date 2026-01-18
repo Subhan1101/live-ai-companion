@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import AvatarPanel from "@/components/AvatarPanel";
 import VideoPanel from "@/components/VideoPanel";
 import TranscriptPanel from "@/components/TranscriptPanel";
 import ControlBar from "@/components/ControlBar";
+import FileUpload from "@/components/FileUpload";
 import { useRealtimeChat } from "@/hooks/useRealtimeChat";
+import { useScreenShare } from "@/hooks/useScreenShare";
 import { toast } from "@/hooks/use-toast";
 
 const Index = () => {
@@ -21,11 +23,22 @@ const Index = () => {
     startRecording,
     stopRecording,
     setSimliAudioHandler,
+    sendImage,
+    sendTextContent,
   } = useRealtimeChat();
+
+  const {
+    isSharing,
+    startScreenShare,
+    stopScreenShare,
+    captureScreenshot,
+  } = useScreenShare();
 
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isMicOn, setIsMicOn] = useState(true);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [showFileUpload, setShowFileUpload] = useState(false);
+  const screenCaptureIntervalRef = useRef<number | null>(null);
 
   // Auto-connect on mount
   useEffect(() => {
@@ -95,12 +108,83 @@ const Index = () => {
     });
   };
 
-  const handleShare = () => {
-    toast({
-      title: "Screen sharing",
-      description: "Screen sharing is not available in this demo.",
-    });
+  const handleShare = async () => {
+    if (isSharing) {
+      // Stop sharing
+      if (screenCaptureIntervalRef.current) {
+        clearInterval(screenCaptureIntervalRef.current);
+        screenCaptureIntervalRef.current = null;
+      }
+      stopScreenShare();
+      toast({
+        title: "Screen sharing stopped",
+        description: "Aria can no longer see your screen.",
+      });
+    } else {
+      try {
+        await startScreenShare();
+        toast({
+          title: "Screen sharing started",
+          description: "Aria can now see your screen. Just ask about what's on screen!",
+        });
+        
+        // Note: Screenshots are sent on-demand when user asks about screen
+        // Not continuously, to avoid overwhelming the API
+      } catch (error) {
+        toast({
+          title: "Screen sharing failed",
+          description: "Could not start screen sharing. Please try again.",
+          variant: "destructive",
+        });
+      }
+    }
   };
+
+  // Function to capture and send screen to AI
+  const handleCaptureScreen = useCallback(async () => {
+    if (!isSharing) {
+      toast({
+        title: "No screen shared",
+        description: "Start screen sharing first to let Aria see your screen.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const screenshot = await captureScreenshot();
+    if (screenshot) {
+      sendImage(screenshot, "image/jpeg", "Look at my screen and help me with what you see. If there's a problem or question visible, help me solve it.");
+      toast({
+        title: "Screen captured",
+        description: "Aria is analyzing your screen...",
+      });
+    }
+  }, [isSharing, captureScreenshot, sendImage]);
+
+  // Handle file upload
+  const handleFileProcessed = useCallback((file: { name: string; type: string; content?: string; base64?: string }) => {
+    if (file.type.startsWith("image/") && file.base64) {
+      sendImage(file.base64, file.type, `I've uploaded an image called "${file.name}". Please analyze it and help me with any questions.`);
+      toast({
+        title: "Image uploaded",
+        description: `Aria is analyzing ${file.name}...`,
+      });
+    } else if (file.content) {
+      sendTextContent(file.content, file.name);
+      toast({
+        title: "File uploaded",
+        description: `Aria is reading ${file.name}...`,
+      });
+    } else if (file.base64) {
+      // PDF - tell user it's uploaded but we can describe what kind of help they need
+      sendTextContent(`[PDF file uploaded: ${file.name}] Please ask me about what you need help with from this document.`, file.name);
+      toast({
+        title: "PDF uploaded",
+        description: "Ask Aria about the contents of your PDF.",
+      });
+    }
+    setShowFileUpload(false);
+  }, [sendImage, sendTextContent]);
 
   const handleToggleCall = () => {
     if (isConnected) {
@@ -157,18 +241,50 @@ const Index = () => {
         </div>
       </div>
 
+      {/* File Upload Modal */}
+      {showFileUpload && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowFileUpload(false)}>
+          <div className="bg-card p-6 rounded-2xl shadow-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-4">Upload a File</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Upload images, PDFs, or text files for Aria to analyze.
+            </p>
+            <FileUpload onFileProcessed={handleFileProcessed} disabled={!isConnected} />
+            <button
+              onClick={() => setShowFileUpload(false)}
+              className="mt-4 w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Control Bar */}
       <ControlBar
         isCameraOn={isCameraOn}
         isMicOn={isMicOn}
         isRecording={isRecording}
         isCallActive={isConnected}
+        isScreenSharing={isSharing}
         recordingTime={recordingTime}
         onToggleCamera={handleToggleCamera}
         onToggleMic={handleToggleMic}
         onShare={handleShare}
+        onCaptureScreen={handleCaptureScreen}
+        onToggleFileUpload={() => setShowFileUpload(true)}
         onToggleCall={handleToggleCall}
       />
+
+      {/* Screen sharing indicator */}
+      {isSharing && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50">
+          <div className="px-4 py-2 bg-destructive/90 text-destructive-foreground rounded-full text-sm font-medium flex items-center gap-2 animate-pulse">
+            <div className="w-2 h-2 rounded-full bg-white" />
+            Screen sharing active - Click "Capture" to send to Aria
+          </div>
+        </div>
+      )}
 
       {/* Connection status indicator */}
       <div className="fixed bottom-24 left-6">
