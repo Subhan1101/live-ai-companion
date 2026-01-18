@@ -20,7 +20,7 @@ const FileUpload = ({ onFileProcessed, disabled }: FileUploadProps) => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const acceptedTypes = [
+  const acceptedMimeTypes = [
     "application/pdf",
     "image/jpeg",
     "image/png",
@@ -31,6 +31,9 @@ const FileUpload = ({ onFileProcessed, disabled }: FileUploadProps) => {
     "application/json",
     "text/markdown",
   ];
+
+  // For the input accept attribute, include extensions too
+  const acceptString = ".pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv,.json,.md,application/pdf,image/*,text/*";
 
   const getFileIcon = (type: string) => {
     if (type.startsWith("image/")) return <Image className="w-4 h-4" />;
@@ -78,7 +81,7 @@ const FileUpload = ({ onFileProcessed, disabled }: FileUploadProps) => {
 
   const handleFiles = async (files: FileList) => {
     for (const file of Array.from(files)) {
-      if (!acceptedTypes.includes(file.type) && !file.name.endsWith(".md") && !file.name.endsWith(".txt")) {
+      if (!acceptedMimeTypes.includes(file.type) && !file.name.endsWith(".md") && !file.name.endsWith(".txt")) {
         console.warn(`File type not supported: ${file.type}`);
         continue;
       }
@@ -134,7 +137,7 @@ const FileUpload = ({ onFileProcessed, disabled }: FileUploadProps) => {
           ref={fileInputRef}
           type="file"
           multiple
-          accept={acceptedTypes.join(",")}
+          accept={acceptString}
           className="hidden"
           onChange={(e) => e.target.files && handleFiles(e.target.files)}
           disabled={disabled}
