@@ -20,8 +20,6 @@ interface TextContent {
   text: string;
 }
 
-type VoiceOption = "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer";
-
 interface UseRealtimeChatReturn {
   messages: Message[];
   partialTranscript: string;
@@ -31,7 +29,6 @@ interface UseRealtimeChatReturn {
   isSpeaking: boolean;
   audioLevel: number;
   status: "idle" | "listening" | "speaking" | "processing";
-  currentVoice: VoiceOption;
   connect: () => Promise<void>;
   disconnect: () => void;
   startRecording: () => void;
@@ -39,7 +36,6 @@ interface UseRealtimeChatReturn {
   setSimliAudioHandler: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
   sendImage: (base64: string, mimeType: string, prompt?: string) => void;
   sendTextContent: (text: string, fileName?: string) => void;
-  changeVoice: (voice: VoiceOption) => void;
 }
 
 const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
@@ -53,9 +49,6 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [status, setStatus] = useState<"idle" | "listening" | "speaking" | "processing">("idle");
-  const [currentVoice, setCurrentVoice] = useState<VoiceOption>("nova");
-  
-  const currentVoiceRef = useRef<VoiceOption>("nova");
 
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -176,8 +169,8 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
                   session: {
                     modalities: ["text", "audio"],
                     instructions:
-                      "You are Aria, a friendly, warm, and caring woman. Your name is Aria – when anyone asks your name, always say 'My name is Aria.' You speak with a gentle, feminine voice full of warmth and empathy. You help users by listening to them and providing supportive, thoughtful responses. Keep your responses conversational, natural, and expressive. You are kind, patient, and understanding. Your knowledge cutoff is 2024.",
-                    voice: currentVoiceRef.current,
+                      "You are Aria, a polished and professional woman with a warm yet composed demeanor. Your name is Aria – when anyone asks your name, always say 'My name is Aria.' You speak with a refined, articulate, and confident feminine voice. You are knowledgeable, helpful, and maintain a professional tone while remaining approachable. Keep your responses clear, thoughtful, and well-structured. You are patient, attentive, and always aim to provide thorough assistance. Your knowledge cutoff is 2024.",
+                    voice: "shimmer",
                     input_audio_format: "pcm16",
                     output_audio_format: "pcm16",
                     input_audio_transcription: {
@@ -581,26 +574,6 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     ]);
   }, []);
 
-  // Change voice dynamically by updating the session
-  const changeVoice = useCallback((voice: VoiceOption) => {
-    console.log("Changing voice to:", voice);
-    currentVoiceRef.current = voice;
-    setCurrentVoice(voice);
-    
-    // If connected, send a session update to change the voice
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sessionCreatedRef.current) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "session.update",
-          session: {
-            voice: voice,
-          },
-        })
-      );
-      console.log("Session update sent for voice change");
-    }
-  }, []);
-
   return {
     messages,
     partialTranscript,
@@ -610,7 +583,6 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     isSpeaking,
     audioLevel,
     status,
-    currentVoice,
     connect,
     disconnect,
     startRecording,
@@ -618,6 +590,5 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     setSimliAudioHandler,
     sendImage,
     sendTextContent,
-    changeVoice,
   };
 };
