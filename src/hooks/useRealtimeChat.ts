@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { AudioRecorder, encodeAudioForAPI, AudioQueue, createWavFromPCM } from "@/lib/audioUtils";
+import { AudioRecorder, encodeAudioForAPI, AudioQueue } from "@/lib/audioUtils";
 import { toast } from "@/hooks/use-toast";
 
 interface Message {
@@ -39,7 +39,6 @@ interface UseRealtimeChatReturn {
 }
 
 const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
-const ELEVENLABS_TTS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/elevenlabs-tts-stream`;
 
 export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -62,9 +61,6 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   // Simli audio handlers
   const simliSendAudioRef = useRef<((data: Uint8Array) => void) | null>(null);
   const simliClearBufferRef = useRef<(() => void) | null>(null);
-  
-  // Track pending TTS text for ElevenLabs
-  const pendingTTSTextRef = useRef<string>("");
 
   // Set Simli audio handler from AvatarPanel
   const setSimliAudioHandler = useCallback(
@@ -81,66 +77,6 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     return () => {
       disconnect();
     };
-  }, []);
-
-  // ElevenLabs TTS function using Lily voice
-  const speakWithElevenLabs = useCallback(async (text: string) => {
-    if (!text || text.trim().length === 0) return;
-    
-    console.log("Speaking with ElevenLabs Lily voice:", text.slice(0, 50) + "...");
-    setIsSpeaking(true);
-    setStatus("speaking");
-    
-    try {
-      const response = await fetch(ELEVENLABS_TTS_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({ text }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`TTS request failed: ${response.status}`);
-      }
-      
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("No response body");
-      }
-      
-      // Process streaming PCM audio (24kHz mono 16-bit)
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        if (value && value.length > 0) {
-          // Send to Simli for lip-sync (primary)
-          if (simliSendAudioRef.current) {
-            simliSendAudioRef.current(value);
-          }
-          
-          // Use fallback audio queue if Simli is not available
-          if (!simliSendAudioRef.current && audioQueueRef.current) {
-            audioQueueRef.current.addToQueue(value);
-          }
-        }
-      }
-      
-      console.log("ElevenLabs TTS complete");
-    } catch (error) {
-      console.error("ElevenLabs TTS error:", error);
-      toast({
-        title: "Voice synthesis error",
-        description: "Failed to generate speech with Lily voice",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSpeaking(false);
-      setStatus("idle");
-    }
   }, []);
 
   const connect = useCallback(async () => {
@@ -223,10 +159,10 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
             }
 
             case "session.created":
-              console.log("Session created, sending configuration with Whisper-1 STT + ElevenLabs TTS...");
+              console.log("Session created, sending configuration with Whisper-1 STT...");
               sessionCreatedRef.current = true;
               // Send session configuration after session is created
-              // Using OpenAI Realtime API with Whisper-1 for STT, ElevenLabs for TTS (text output only)
+              // Using OpenAI Realtime API with Whisper-1 for STT and shimmer voice for TTS
               ws.send(
                 JSON.stringify({
                   type: "session.update",
@@ -316,51 +252,44 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               break;
 
             case "response.created":
-              console.log("AI response started - will use ElevenLabs TTS");
+              console.log("AI response started - TTS will follow");
               setIsProcessing(true);
               setStatus("processing");
-              pendingTTSTextRef.current = "";
               break;
 
             case "response.output_item.added":
               console.log("Response output item added:", data.item?.type);
               break;
 
-            case "response.text.delta":
-              // Text response from OpenAI (we'll use this for ElevenLabs TTS)
+            case "response.audio.delta":
+              // TTS audio from OpenAI Realtime API (shimmer voice)
+              setIsSpeaking(true);
+              setStatus("speaking");
+              setIsProcessing(false);
+              
+              // Convert base64 to Uint8Array
               if (data.delta) {
-                pendingTTSTextRef.current += data.delta;
-                // Update messages with text as it comes in
-                setMessages((prev) => {
-                  const last = prev[prev.length - 1];
-                  if (last?.role === "assistant") {
-                    return prev.map((m, i) =>
-                      i === prev.length - 1 ? { ...m, content: m.content + data.delta } : m
-                    );
-                  }
-                  return [
-                    ...prev,
-                    {
-                      id: crypto.randomUUID(),
-                      role: "assistant",
-                      content: data.delta,
-                      timestamp: new Date(),
-                    },
-                  ];
-                });
+                const binaryString = atob(data.delta);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                // Send to Simli for lip-sync (primary)
+                if (simliSendAudioRef.current) {
+                  simliSendAudioRef.current(bytes);
+                }
+                
+                // Use fallback audio queue if Simli is not available
+                if (!simliSendAudioRef.current && audioQueueRef.current) {
+                  audioQueueRef.current.addToQueue(bytes);
+                }
               }
               break;
 
-            case "response.audio.delta":
-              // OpenAI TTS audio - we ignore this and use ElevenLabs instead
-              // Just update UI states
-              setIsProcessing(false);
-              break;
-
             case "response.audio_transcript.delta":
-              // Live TTS transcript from OpenAI - use this for text display and ElevenLabs TTS
+              // Live TTS transcript from OpenAI
               if (data.delta) {
-                pendingTTSTextRef.current += data.delta;
                 setMessages((prev) => {
                   const last = prev[prev.length - 1];
                   if (last?.role === "assistant") {
@@ -382,15 +311,11 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               break;
 
             case "response.audio_transcript.done":
-              console.log("Transcript complete, triggering ElevenLabs TTS");
+              console.log("TTS transcript complete");
               break;
 
             case "response.audio.done":
-              console.log("OpenAI audio done - now speaking with ElevenLabs Lily voice");
-              // Trigger ElevenLabs TTS with the accumulated text
-              if (pendingTTSTextRef.current.trim().length > 0) {
-                speakWithElevenLabs(pendingTTSTextRef.current);
-              }
+              console.log("TTS audio stream complete");
               break;
 
             case "response.output_item.done":
@@ -399,8 +324,9 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
 
             case "response.done":
               console.log("Full response complete");
+              setIsSpeaking(false);
               setIsProcessing(false);
-              // Note: isSpeaking and status will be set by speakWithElevenLabs when done
+              setStatus("idle");
               break;
 
             case "rate_limits.updated":
