@@ -4,6 +4,7 @@ import VideoPanel from "@/components/VideoPanel";
 import TranscriptPanel from "@/components/TranscriptPanel";
 import ControlBar from "@/components/ControlBar";
 import FileUpload from "@/components/FileUpload";
+import WhiteboardModal from "@/components/WhiteboardModal";
 
 import { useRealtimeChat } from "@/hooks/useRealtimeChat";
 import { useScreenShare } from "@/hooks/useScreenShare";
@@ -26,6 +27,9 @@ const Index = () => {
     setSimliAudioHandler,
     sendImage,
     sendTextContent,
+    whiteboardContent,
+    showWhiteboard,
+    closeWhiteboard,
   } = useRealtimeChat();
 
   const {
@@ -279,6 +283,13 @@ const Index = () => {
           </div>
         </div>
       )}
+
+      {/* Whiteboard Modal */}
+      <WhiteboardModal
+        open={showWhiteboard}
+        onOpenChange={closeWhiteboard}
+        content={whiteboardContent}
+      />
 
       {/* Control Bar */}
       <ControlBar

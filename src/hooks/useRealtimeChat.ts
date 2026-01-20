@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { AudioRecorder, encodeAudioForAPI, AudioQueue } from "@/lib/audioUtils";
 import { PCM16Resampler } from "@/lib/pcmResampler";
 import { toast } from "@/hooks/use-toast";
+import { extractWhiteboardContent, removeWhiteboardMarkers } from "@/lib/whiteboardParser";
 
 interface Message {
   id: string;
@@ -37,6 +38,9 @@ interface UseRealtimeChatReturn {
   setSimliAudioHandler: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
   sendImage: (base64: string, mimeType: string, prompt?: string) => void;
   sendTextContent: (text: string, fileName?: string) => void;
+  whiteboardContent: string;
+  showWhiteboard: boolean;
+  closeWhiteboard: () => void;
 }
 
 const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
@@ -50,6 +54,8 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [status, setStatus] = useState<"idle" | "listening" | "speaking" | "processing">("idle");
+  const [whiteboardContent, setWhiteboardContent] = useState("");
+  const [showWhiteboard, setShowWhiteboard] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -176,8 +182,39 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
                   type: "session.update",
                   session: {
                     modalities: ["text", "audio"],
-                    instructions:
-                      "You are Aria, a polished and professional woman with a warm yet composed demeanor. Your name is Aria – when anyone asks your name, always say 'My name is Aria.' You speak with a refined, articulate, and confident feminine voice. You are knowledgeable, helpful, and maintain a professional tone while remaining approachable. Keep your responses clear, thoughtful, and well-structured. You are patient, attentive, and always aim to provide thorough assistance. Your knowledge cutoff is 2024.",
+                    instructions: `You are Aria, a polished and professional woman with a warm yet composed demeanor. Your name is Aria – when anyone asks your name, always say 'My name is Aria.' You speak with a refined, articulate, and confident feminine voice. You are knowledgeable, helpful, and maintain a professional tone while remaining approachable. Keep your responses clear, thoughtful, and well-structured. You are patient, attentive, and always aim to provide thorough assistance. Your knowledge cutoff is 2024.
+
+IMPORTANT - WHITEBOARD EXPLANATIONS:
+When a user asks a question that requires step-by-step explanation (math problems, equations, algorithms, scientific processes, coding concepts, or any detailed walkthrough), you MUST format your response using these special markers:
+
+[WHITEBOARD_START]
+## Title: [Short descriptive title of the problem]
+
+### Problem
+[State the original problem clearly]
+
+### Solution
+
+**Step 1:** [First step description]
+$$[LaTeX math expression if applicable]$$
+
+**Step 2:** [Second step description]  
+$$[LaTeX math]$$
+
+[Continue with more steps as needed...]
+
+### Answer
+[Final answer with explanation]
+[WHITEBOARD_END]
+
+Use LaTeX notation for all mathematical expressions:
+- Fractions: \\frac{numerator}{denominator}
+- Square roots: \\sqrt{expression}
+- Powers: x^{2} or x^{n}
+- Greek letters: \\alpha, \\beta, \\pi
+- Subscripts: x_{1}, a_{n}
+
+For regular conversational questions that don't need step-by-step explanation, respond normally without the markers. Only use whiteboard markers when detailed visual explanation would genuinely help the user understand.`,
                     voice: "shimmer",
                     input_audio_format: "pcm16",
                     output_audio_format: "pcm16",
@@ -393,6 +430,20 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               if (data.delta) {
                 setMessages((prev) => {
                   const last = prev[prev.length - 1];
+                  const newContent = last?.role === "assistant" 
+                    ? last.content + data.delta 
+                    : data.delta;
+                  
+                  // Check for whiteboard content in the accumulated message
+                  const { content: wbContent, hasWhiteboard } = extractWhiteboardContent(newContent);
+                  if (hasWhiteboard && wbContent.length > 50) {
+                    // Update whiteboard state
+                    setWhiteboardContent(wbContent);
+                    if (!showWhiteboard) {
+                      setShowWhiteboard(true);
+                    }
+                  }
+                  
                   if (last?.role === "assistant") {
                     return prev.map((m, i) =>
                       i === prev.length - 1 ? { ...m, content: m.content + data.delta } : m
@@ -413,6 +464,28 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
 
             case "response.audio_transcript.done":
               console.log("TTS transcript complete");
+              // Final extraction of whiteboard content
+              setMessages((prev) => {
+                const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
+                if (lastAssistant) {
+                  const { content: wbContent, hasWhiteboard } = extractWhiteboardContent(lastAssistant.content);
+                  if (hasWhiteboard && wbContent.length > 20) {
+                    setWhiteboardContent(wbContent);
+                    setShowWhiteboard(true);
+                  }
+                  
+                  // Clean up the chat message by removing whiteboard markers
+                  const cleanedContent = removeWhiteboardMarkers(lastAssistant.content);
+                  if (cleanedContent !== lastAssistant.content) {
+                    return prev.map((m) =>
+                      m.id === lastAssistant.id 
+                        ? { ...m, content: cleanedContent || "I've prepared a detailed explanation on the whiteboard." } 
+                        : m
+                    );
+                  }
+                }
+                return prev;
+              });
               break;
 
             case "response.audio.done":
@@ -679,6 +752,10 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     ]);
   }, []);
 
+  const closeWhiteboard = useCallback(() => {
+    setShowWhiteboard(false);
+  }, []);
+
   return {
     messages,
     partialTranscript,
@@ -695,5 +772,8 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     setSimliAudioHandler,
     sendImage,
     sendTextContent,
+    whiteboardContent,
+    showWhiteboard,
+    closeWhiteboard,
   };
 };
