@@ -57,10 +57,26 @@ export function removeWhiteboardMarkers(text: string): string {
 }
 
 /**
+ * Converts various LaTeX delimiters to a standard format
+ * Handles: \(...\), \[...\], $$...$$, $...$
+ */
+function normalizeLatexDelimiters(text: string): string {
+  // Convert \[...\] (display) to $$...$$
+  let result = text.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$1$$');
+  
+  // Convert \(...\) (inline) to $...$
+  result = result.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+  
+  return result;
+}
+
+/**
  * Parses whiteboard content into structured sections
  */
 export function parseWhiteboardContent(content: string): ParsedWhiteboard {
-  const lines = content.split('\n');
+  // First normalize all LaTeX delimiters
+  const normalizedContent = normalizeLatexDelimiters(content);
+  const lines = normalizedContent.split('\n');
   const sections: WhiteboardSection[] = [];
   let title = '';
   let currentSection: WhiteboardSection | null = null;
@@ -173,27 +189,33 @@ export function parseWhiteboardContent(content: string): ParsedWhiteboard {
 /**
  * Extracts inline LaTeX expressions from text
  * Returns array of {text, isLatex} segments
+ * Handles both $...$ and \(...\) delimiters
  */
 export function parseInlineLatex(text: string): Array<{ text: string; isLatex: boolean }> {
+  // First normalize any remaining \(...\) to $...$
+  const normalizedText = normalizeLatexDelimiters(text);
+  
   const segments: Array<{ text: string; isLatex: boolean }> = [];
-  const regex = /\$([^$]+)\$/g;
+  // Match both single $ inline and $$ display math
+  const regex = /\$\$([^$]+)\$\$|\$([^$]+)\$/g;
   let lastIndex = 0;
   let match;
   
-  while ((match = regex.exec(text)) !== null) {
+  while ((match = regex.exec(normalizedText)) !== null) {
     // Text before the math
     if (match.index > lastIndex) {
-      segments.push({ text: text.slice(lastIndex, match.index), isLatex: false });
+      segments.push({ text: normalizedText.slice(lastIndex, match.index), isLatex: false });
     }
-    // The math expression
-    segments.push({ text: match[1], isLatex: true });
+    // The math expression (match[1] for $$, match[2] for $)
+    const latex = match[1] || match[2];
+    segments.push({ text: latex, isLatex: true });
     lastIndex = regex.lastIndex;
   }
   
   // Remaining text after last match
-  if (lastIndex < text.length) {
-    segments.push({ text: text.slice(lastIndex), isLatex: false });
+  if (lastIndex < normalizedText.length) {
+    segments.push({ text: normalizedText.slice(lastIndex), isLatex: false });
   }
   
-  return segments.length > 0 ? segments : [{ text, isLatex: false }];
+  return segments.length > 0 ? segments : [{ text: normalizedText, isLatex: false }];
 }
