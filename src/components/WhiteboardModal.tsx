@@ -26,7 +26,7 @@ interface WhiteboardModalProps {
 
 // Render LaTeX math using KaTeX
 const MathBlock = ({ latex, displayMode = true }: { latex: string; displayMode?: boolean }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (containerRef.current && latex) {
@@ -48,7 +48,8 @@ const MathBlock = ({ latex, displayMode = true }: { latex: string; displayMode?:
     }
   }, [latex, displayMode]);
 
-  return <div ref={containerRef} className={displayMode ? "my-4 text-center" : "inline"} />;
+  const Tag = displayMode ? ("div" as const) : ("span" as const);
+  return <Tag ref={containerRef as any} className={displayMode ? "my-4 text-center" : "inline"} />;
 };
 
 // Render text with inline LaTeX
