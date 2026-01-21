@@ -11,6 +11,25 @@ export interface ParsedWhiteboard {
 }
 
 /**
+ * Checks if text contains whiteboard content markers or math expressions
+ */
+export function hasWhiteboardContent(text: string): boolean {
+  const startMarker = '[WHITEBOARD_START]';
+  
+  // Check for explicit markers
+  if (text.includes(startMarker)) {
+    return true;
+  }
+  
+  // Also check for math expressions that could benefit from whiteboard display
+  // Look for LaTeX patterns: $...$, $$...$$, \(...\), \[...\]
+  const hasMath = /\$[^$]+\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]/.test(text);
+  const hasSteps = /\*\*Step\s*\d+:?\*\*/i.test(text) || /^Step\s*\d+:/im.test(text);
+  
+  return hasMath && hasSteps;
+}
+
+/**
  * Extracts whiteboard content from between [WHITEBOARD_START] and [WHITEBOARD_END] markers
  */
 export function extractWhiteboardContent(text: string): { content: string; hasWhiteboard: boolean } {
@@ -29,6 +48,11 @@ export function extractWhiteboardContent(text: string): { content: string; hasWh
   if (startIndex !== -1 && endIndex === -1) {
     const content = text.slice(startIndex + startMarker.length).trim();
     return { content, hasWhiteboard: true };
+  }
+  
+  // If no markers but has math content, return the full text as whiteboard content
+  if (hasWhiteboardContent(text)) {
+    return { content: text, hasWhiteboard: true };
   }
   
   return { content: '', hasWhiteboard: false };
