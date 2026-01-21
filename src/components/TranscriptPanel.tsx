@@ -6,6 +6,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  originalContent?: string; // Raw content with whiteboard markers
   timestamp: Date;
 }
 
@@ -66,9 +67,10 @@ export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onU
                 </div>
                 {message.role === "assistant" && (
                   <div className="flex items-center gap-2 text-muted-foreground">
-                    {hasWhiteboardContent(message.content) && onShowWhiteboard && (
+                    {/* Check originalContent (if available) or content for whiteboard markers */}
+                    {(message.originalContent || hasWhiteboardContent(message.content)) && onShowWhiteboard && (
                       <button 
-                        onClick={() => onShowWhiteboard(message.content)}
+                        onClick={() => onShowWhiteboard(message.originalContent || message.content)}
                         className="p-1.5 hover:bg-primary/20 hover:text-primary rounded-lg transition-colors flex items-center gap-1 text-xs"
                         title="Show on Whiteboard"
                       >
