@@ -8,6 +8,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  originalContent?: string; // Stores raw content with whiteboard markers for detection
   timestamp: Date;
 }
 
@@ -458,16 +459,21 @@ For regular conversational questions that don't need step-by-step explanation, r
 
             case "response.audio_transcript.done":
               console.log("TTS transcript complete");
-              // Clean up the chat message by removing whiteboard markers (but don't auto-open)
+              // Clean up the chat message by removing whiteboard markers (but keep original for detection)
               setMessages((prev) => {
                 const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
                 if (lastAssistant) {
+                  const { hasWhiteboard } = extractWhiteboardContent(lastAssistant.content);
                   // Clean up the chat message by removing whiteboard markers
                   const cleanedContent = removeWhiteboardMarkers(lastAssistant.content);
                   if (cleanedContent !== lastAssistant.content) {
                     return prev.map((m) =>
                       m.id === lastAssistant.id 
-                        ? { ...m, content: cleanedContent || "I've prepared a detailed explanation. Click 'Whiteboard' to view." } 
+                        ? { 
+                            ...m, 
+                            originalContent: lastAssistant.content, // Keep original for whiteboard button detection
+                            content: cleanedContent || (hasWhiteboard ? "I've prepared a detailed explanation. Click 'Whiteboard' to view." : lastAssistant.content)
+                          } 
                         : m
                     );
                   }

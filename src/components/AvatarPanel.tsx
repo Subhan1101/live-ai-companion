@@ -168,7 +168,7 @@ export const AvatarPanel = ({
       case "processing":
         return "Thinking...";
       default:
-        return isSimliReady ? "Say something!" : "Loading...";
+        return isSimliReady ? "Say something!" : "Teacher is coming...";
     }
   };
 
@@ -198,8 +198,8 @@ export const AvatarPanel = ({
               </div>
             ) : (
               <div className="text-center">
-                <div className="text-6xl mb-4 animate-pulse">🤖</div>
-                <p className="text-white/80 text-sm">Loading avatar...</p>
+                <div className="text-6xl mb-4 animate-pulse">👩‍🏫</div>
+                <p className="text-white/80 text-sm">Teacher is coming...</p>
               </div>
             )}
           </div>
