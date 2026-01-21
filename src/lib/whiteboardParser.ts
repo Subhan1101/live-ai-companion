@@ -86,10 +86,10 @@ export function removeWhiteboardMarkers(text: string): string {
  */
 function normalizeLatexDelimiters(text: string): string {
   // Convert \[...\] (display) to $$...$$
-  let result = text.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$1$$');
+  let result = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => `$$${inner}$$`);
   
   // Convert \(...\) (inline) to $...$
-  result = result.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+  result = result.replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => `$${inner}$`);
   
   return result;
 }
@@ -220,8 +220,9 @@ export function parseInlineLatex(text: string): Array<{ text: string; isLatex: b
   const normalizedText = normalizeLatexDelimiters(text);
   
   const segments: Array<{ text: string; isLatex: boolean }> = [];
-  // Match both single $ inline and $$ display math
-  const regex = /\$\$([^$]+)\$\$|\$([^$]+)\$/g;
+  // Non-greedy match for $$ display math first, then $ inline math
+  // Use lazy quantifiers (.*?) to avoid over-matching
+  const regex = /\$\$([\s\S]*?)\$\$|\$([^$\n]+?)\$/g;
   let lastIndex = 0;
   let match;
   
@@ -231,8 +232,10 @@ export function parseInlineLatex(text: string): Array<{ text: string; isLatex: b
       segments.push({ text: normalizedText.slice(lastIndex, match.index), isLatex: false });
     }
     // The math expression (match[1] for $$, match[2] for $)
-    const latex = match[1] || match[2];
-    segments.push({ text: latex, isLatex: true });
+    const latex = (match[1] ?? match[2] ?? '').trim();
+    if (latex) {
+      segments.push({ text: latex, isLatex: true });
+    }
     lastIndex = regex.lastIndex;
   }
   
