@@ -13,6 +13,7 @@ import {
   ParsedWhiteboard,
   parseWhiteboardContent,
   parseInlineLatex,
+  sanitizeLatex,
 } from "@/lib/whiteboardParser";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -29,8 +30,10 @@ const MathBlock = ({ latex, displayMode = true }: { latex: string; displayMode?:
 
   useEffect(() => {
     if (containerRef.current && latex) {
+      // Sanitize to remove any nested delimiters before rendering
+      const cleanLatex = sanitizeLatex(latex);
       try {
-        katex.render(latex, containerRef.current, {
+        katex.render(cleanLatex, containerRef.current, {
           displayMode,
           throwOnError: false,
           strict: false,
@@ -38,7 +41,8 @@ const MathBlock = ({ latex, displayMode = true }: { latex: string; displayMode?:
       } catch (e) {
         console.error("KaTeX render error:", e);
         if (containerRef.current) {
-          containerRef.current.textContent = latex;
+          // Show clean latex without delimiters as fallback
+          containerRef.current.textContent = cleanLatex;
         }
       }
     }
@@ -93,7 +97,9 @@ const WhiteboardModal = ({ open, onOpenChange, content }: WhiteboardModalProps) 
               <div className="p-2 rounded-lg bg-primary/10">
                 <PenLine className="w-5 h-5 text-primary" />
               </div>
-              <DialogTitle className="text-xl font-semibold">{parsed.title}</DialogTitle>
+              <DialogTitle className="text-xl font-semibold">
+                <TextWithMath text={parsed.title} />
+              </DialogTitle>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={handleCopy} className="gap-2">

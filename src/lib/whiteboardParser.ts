@@ -11,6 +11,36 @@ export interface ParsedWhiteboard {
 }
 
 /**
+ * Sanitizes LaTeX by stripping nested or redundant dollar sign delimiters.
+ * Handles cases like "$$$x^2$$$" -> "x^2", "$$x$$" -> "x", "$x$" -> "x"
+ * This prevents KaTeX from receiving invalid nested delimiters.
+ */
+export function sanitizeLatex(latex: string): string {
+  if (!latex) return '';
+  
+  let result = latex.trim();
+  
+  // Repeatedly strip outer delimiters until none remain
+  let changed = true;
+  while (changed) {
+    changed = false;
+    
+    // Strip outer $$ delimiters
+    if (result.startsWith('$$') && result.endsWith('$$') && result.length > 4) {
+      result = result.slice(2, -2).trim();
+      changed = true;
+    }
+    // Strip outer $ delimiters (but not if it's just a single $)
+    else if (result.startsWith('$') && result.endsWith('$') && result.length > 2) {
+      result = result.slice(1, -1).trim();
+      changed = true;
+    }
+  }
+  
+  return result;
+}
+
+/**
  * Checks if text contains whiteboard content markers or math expressions
  */
 export function hasWhiteboardContent(text: string): boolean {
@@ -170,7 +200,7 @@ export function parseWhiteboardContent(content: string): ParsedWhiteboard {
       if (currentSection) sections.push(currentSection);
       sections.push({ 
         type: 'math', 
-        content: line.slice(2, -2).trim() 
+        content: sanitizeLatex(line.slice(2, -2)) 
       });
       currentSection = null;
       continue;
@@ -185,7 +215,7 @@ export function parseWhiteboardContent(content: string): ParsedWhiteboard {
         mathContent += lines[i].trim() + ' ';
         i++;
       }
-      sections.push({ type: 'math', content: mathContent.trim() });
+      sections.push({ type: 'math', content: sanitizeLatex(mathContent) });
       currentSection = null;
       continue;
     }
@@ -232,7 +262,9 @@ export function parseInlineLatex(text: string): Array<{ text: string; isLatex: b
       segments.push({ text: normalizedText.slice(lastIndex, match.index), isLatex: false });
     }
     // The math expression (match[1] for $$, match[2] for $)
-    const latex = (match[1] ?? match[2] ?? '').trim();
+    const rawLatex = (match[1] ?? match[2] ?? '').trim();
+    // Sanitize to remove any nested delimiters
+    const latex = sanitizeLatex(rawLatex);
     if (latex) {
       segments.push({ text: latex, isLatex: true });
     }
