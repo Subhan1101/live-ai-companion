@@ -66,8 +66,9 @@ export const AvatarPanel = ({
         console.log("Initializing Simli with face:", AVATAR_FACE_ID);
         
         // Fetch API key from edge function
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
         const response = await fetch(
-          "https://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/simli-token"
+          `${supabaseUrl}/functions/v1/simli-token`
         );
         
         if (!response.ok) {
