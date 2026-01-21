@@ -216,6 +216,16 @@ Use LaTeX notation for all mathematical expressions:
 - Greek letters: \\alpha, \\beta, \\pi
 - Subscripts: x_{1}, a_{n}
 
+CRITICAL LATEX RULES - NEVER VIOLATE THESE:
+1. NEVER use nested dollar signs. Write $$x^2 + 1$$, NOT $$$x^2 + 1$$$
+2. NEVER use $1 or $2 as placeholders. Always write the actual expression.
+3. Inside $$...$$ blocks, put ONLY raw LaTeX without any additional $ signs.
+4. For inline math, use $...$ with just one $ on each side.
+
+MATH SOLVING BEHAVIOR:
+- When asked to "solve" an expression like "x^2 - x + 9", treat it as an equation set to zero: x^2 - x + 9 = 0
+- Always state clearly: "Setting the expression equal to zero: [expression] = 0"
+
 For regular conversational questions that don't need step-by-step explanation, respond normally without the markers. Only use whiteboard markers when detailed visual explanation would genuinely help the user understand.`,
                     voice: "shimmer",
                     input_audio_format: "pcm16",
