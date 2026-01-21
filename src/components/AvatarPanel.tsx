@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from "react";
 import { Mic } from "lucide-react";
 import { SimliClient } from "simli-client";
+import { supabase } from "@/integrations/supabase/client";
 
 // Fixed avatar configuration
 const AVATAR_FACE_ID = "5fc23ea5-8175-4a82-aaaf-cdd8c88543dc";
@@ -65,17 +66,14 @@ export const AvatarPanel = ({
         
         console.log("Initializing Simli with face:", AVATAR_FACE_ID);
         
-        // Fetch API key from edge function
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const response = await fetch(
-          `${supabaseUrl}/functions/v1/simli-token`
-        );
-        
-        if (!response.ok) {
-          throw new Error("Failed to get Simli token");
+        // Fetch API key from backend function (using the client SDK avoids CORS/URL issues)
+        const { data, error } = await supabase.functions.invoke("simli-token");
+
+        if (error) {
+          throw new Error(error.message || "Failed to get Simli token");
         }
-        
-        const { apiKey } = await response.json();
+
+        const apiKey = (data as any)?.apiKey as string | undefined;
         
         if (!apiKey) {
           throw new Error("No API key returned");
