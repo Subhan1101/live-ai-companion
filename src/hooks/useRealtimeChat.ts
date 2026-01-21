@@ -40,6 +40,7 @@ interface UseRealtimeChatReturn {
   sendTextContent: (text: string, fileName?: string) => void;
   whiteboardContent: string;
   showWhiteboard: boolean;
+  openWhiteboard: (content: string) => void;
   closeWhiteboard: () => void;
 }
 
@@ -434,15 +435,8 @@ For regular conversational questions that don't need step-by-step explanation, r
                     ? last.content + data.delta 
                     : data.delta;
                   
-                  // Check for whiteboard content in the accumulated message
-                  const { content: wbContent, hasWhiteboard } = extractWhiteboardContent(newContent);
-                  if (hasWhiteboard && wbContent.length > 50) {
-                    // Update whiteboard state
-                    setWhiteboardContent(wbContent);
-                    if (!showWhiteboard) {
-                      setShowWhiteboard(true);
-                    }
-                  }
+                  // Note: Whiteboard content is now shown on-demand via button click
+                  // No auto-popup - user controls when to view whiteboard
                   
                   if (last?.role === "assistant") {
                     return prev.map((m, i) =>
@@ -464,22 +458,16 @@ For regular conversational questions that don't need step-by-step explanation, r
 
             case "response.audio_transcript.done":
               console.log("TTS transcript complete");
-              // Final extraction of whiteboard content
+              // Clean up the chat message by removing whiteboard markers (but don't auto-open)
               setMessages((prev) => {
                 const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
                 if (lastAssistant) {
-                  const { content: wbContent, hasWhiteboard } = extractWhiteboardContent(lastAssistant.content);
-                  if (hasWhiteboard && wbContent.length > 20) {
-                    setWhiteboardContent(wbContent);
-                    setShowWhiteboard(true);
-                  }
-                  
                   // Clean up the chat message by removing whiteboard markers
                   const cleanedContent = removeWhiteboardMarkers(lastAssistant.content);
                   if (cleanedContent !== lastAssistant.content) {
                     return prev.map((m) =>
                       m.id === lastAssistant.id 
-                        ? { ...m, content: cleanedContent || "I've prepared a detailed explanation on the whiteboard." } 
+                        ? { ...m, content: cleanedContent || "I've prepared a detailed explanation. Click 'Whiteboard' to view." } 
                         : m
                     );
                   }
@@ -752,6 +740,12 @@ For regular conversational questions that don't need step-by-step explanation, r
     ]);
   }, []);
 
+  const openWhiteboard = useCallback((content: string) => {
+    const { content: wbContent } = extractWhiteboardContent(content);
+    setWhiteboardContent(wbContent || content);
+    setShowWhiteboard(true);
+  }, []);
+
   const closeWhiteboard = useCallback(() => {
     setShowWhiteboard(false);
   }, []);
@@ -774,6 +768,7 @@ For regular conversational questions that don't need step-by-step explanation, r
     sendTextContent,
     whiteboardContent,
     showWhiteboard,
+    openWhiteboard,
     closeWhiteboard,
   };
 };

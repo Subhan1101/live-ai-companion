@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { Copy, RotateCcw, ThumbsUp, ThumbsDown, Send, Upload } from "lucide-react";
+import { Copy, RotateCcw, ThumbsUp, ThumbsDown, Send, Upload, PenLine } from "lucide-react";
+import { hasWhiteboardContent } from "@/lib/whiteboardParser";
 
 interface Message {
   id: string;
@@ -13,13 +14,14 @@ interface TranscriptPanelProps {
   partialTranscript: string;
   isProcessing: boolean;
   onUploadClick?: () => void;
+  onShowWhiteboard?: (content: string) => void;
 }
 
 const formatTime = (date: Date) => {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
-export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onUploadClick }: TranscriptPanelProps) => {
+export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onUploadClick, onShowWhiteboard }: TranscriptPanelProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -64,6 +66,16 @@ export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onU
                 </div>
                 {message.role === "assistant" && (
                   <div className="flex items-center gap-2 text-muted-foreground">
+                    {hasWhiteboardContent(message.content) && onShowWhiteboard && (
+                      <button 
+                        onClick={() => onShowWhiteboard(message.content)}
+                        className="p-1.5 hover:bg-primary/20 hover:text-primary rounded-lg transition-colors flex items-center gap-1 text-xs"
+                        title="Show on Whiteboard"
+                      >
+                        <PenLine className="w-4 h-4" />
+                        <span>Whiteboard</span>
+                      </button>
+                    )}
                     <button className="p-1.5 hover:bg-muted rounded-lg transition-colors">
                       <Copy className="w-4 h-4" />
                     </button>

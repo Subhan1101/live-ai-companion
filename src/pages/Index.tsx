@@ -29,6 +29,7 @@ const Index = () => {
     sendTextContent,
     whiteboardContent,
     showWhiteboard,
+    openWhiteboard,
     closeWhiteboard,
   } = useRealtimeChat();
 
@@ -260,6 +261,7 @@ const Index = () => {
               partialTranscript={partialTranscript}
               isProcessing={isProcessing}
               onUploadClick={() => setShowFileUpload(true)}
+              onShowWhiteboard={openWhiteboard}
             />
           </div>
         </div>
