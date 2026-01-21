@@ -67,17 +67,21 @@ export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onU
                 </div>
                 {message.role === "assistant" && (
                   <div className="flex items-center gap-2 text-muted-foreground">
-                    {/* Check originalContent (if available) or content for whiteboard markers */}
-                    {(message.originalContent || hasWhiteboardContent(message.content)) && onShowWhiteboard && (
+                    {(() => {
+                      const raw = message.originalContent ?? message.content;
+                      const canShow = Boolean(onShowWhiteboard) && hasWhiteboardContent(raw);
+                      if (!canShow) return null;
+                      return (
                       <button 
-                        onClick={() => onShowWhiteboard(message.originalContent || message.content)}
+                        onClick={() => onShowWhiteboard?.(raw)}
                         className="p-1.5 hover:bg-primary/20 hover:text-primary rounded-lg transition-colors flex items-center gap-1 text-xs"
                         title="Show on Whiteboard"
                       >
                         <PenLine className="w-4 h-4" />
                         <span>Whiteboard</span>
                       </button>
-                    )}
+                      );
+                    })()}
                     <button className="p-1.5 hover:bg-muted rounded-lg transition-colors">
                       <Copy className="w-4 h-4" />
                     </button>

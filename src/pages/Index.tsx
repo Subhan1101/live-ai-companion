@@ -46,6 +46,16 @@ const Index = () => {
   const [showFileUpload, setShowFileUpload] = useState(false);
   const screenCaptureIntervalRef = useRef<number | null>(null);
 
+  // Only close when the dialog requests to close.
+  // (Radix may call onOpenChange(true) in controlled mode in some cases;
+  // we must not immediately close on open.)
+  const handleWhiteboardOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) closeWhiteboard();
+    },
+    [closeWhiteboard]
+  );
+
   // Auto-connect on mount
   useEffect(() => {
     connect();
@@ -289,7 +299,7 @@ const Index = () => {
       {/* Whiteboard Modal */}
       <WhiteboardModal
         open={showWhiteboard}
-        onOpenChange={closeWhiteboard}
+        onOpenChange={handleWhiteboardOpenChange}
         content={whiteboardContent}
       />
 
