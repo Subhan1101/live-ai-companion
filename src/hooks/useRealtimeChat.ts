@@ -78,6 +78,83 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   // PCM16 resampler for Simli (24kHz -> 16kHz)
   const resamplerRef = useRef<PCM16Resampler>(new PCM16Resampler(24000, 16000));
 
+  // Whiteboard repair: sometimes the model emits placeholder tokens like "$1" instead of real formulas.
+  const pendingWhiteboardRepairRef = useRef(false);
+
+  const countPlaceholderTokens = useCallback((text: string) => {
+    // Match standalone "$<digit>" but avoid currency like $10 or $1.50
+    const re = /(^|[\s:])\$([1-9])(?![0-9.])(?=[\s.,;:!?)]|$)/g;
+    return (text.match(re) ?? []).length;
+  }, []);
+
+  const needsWhiteboardRepair = useCallback(
+    (text: string) => countPlaceholderTokens(text) >= 2,
+    [countPlaceholderTokens]
+  );
+
+  const requestWhiteboardRepair = useCallback(
+    (rawWhiteboardBlock: string) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+      pendingWhiteboardRepairRef.current = true;
+      setShowWhiteboard(false);
+      setWhiteboardContent("");
+
+      toast({
+        title: "Fixing formatting…",
+        description: "Regenerating the whiteboard without placeholder tokens.",
+      });
+
+      const itemId = crypto.randomUUID();
+      wsRef.current.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            id: itemId,
+            type: "message",
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text:
+                  "The following WHITEBOARD response is malformed because it contains placeholder tokens like $1 instead of real formulas/expressions. " +
+                  "Rewrite it properly.\n\n" +
+                  "Rules:\n" +
+                  "- Output ONLY a corrected [WHITEBOARD_START] ... [WHITEBOARD_END] block (include both markers).\n" +
+                  "- Do NOT use $1/$2 placeholders. Always write the actual formulas (e.g., D = b^2 - 4ac, quadratic formula, etc.).\n" +
+                  "- Do NOT nest dollar signs. Inside $$...$$ blocks, include only raw LaTeX with no extra $ signs.\n" +
+                  "- Put the equation in the Problem section as display math (use $$...$$), not in the Title.\n\n" +
+                  "MALFORMED WHITEBOARD:\n" +
+                  rawWhiteboardBlock,
+              },
+            ],
+          },
+        })
+      );
+      wsRef.current.send(JSON.stringify({ type: "response.create" }));
+    },
+    []
+  );
+
+  // If we requested a repair, auto-open the next valid whiteboard response (only for repairs).
+  useEffect(() => {
+    if (!pendingWhiteboardRepairRef.current) return;
+
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    const source = lastAssistant?.originalContent || lastAssistant?.content;
+    if (!source) return;
+
+    const extracted = extractWhiteboardContent(source);
+    if (!extracted.hasWhiteboard) return;
+
+    // Only open when placeholders are gone
+    if (!needsWhiteboardRepair(extracted.content)) {
+      pendingWhiteboardRepairRef.current = false;
+      setWhiteboardContent(extracted.content);
+      setShowWhiteboard(true);
+    }
+  }, [messages, needsWhiteboardRepair]);
+
   // Set Simli audio handler from AvatarPanel
   const setSimliAudioHandler = useCallback(
     (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => {
@@ -187,26 +264,22 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
                     instructions: `You are Aria, a polished and professional woman with a warm yet composed demeanor. Your name is Aria – when anyone asks your name, always say 'My name is Aria.' You speak with a refined, articulate, and confident feminine voice. You are knowledgeable, helpful, and maintain a professional tone while remaining approachable. Keep your responses clear, thoughtful, and well-structured. You are patient, attentive, and always aim to provide thorough assistance. Your knowledge cutoff is 2024.
 
 IMPORTANT - WHITEBOARD EXPLANATIONS:
-When a user asks a question that requires step-by-step explanation (math problems, equations, algorithms, scientific processes, coding concepts, or any detailed walkthrough), you MUST format your response using these special markers:
+When a user asks a question that requires step-by-step explanation (math problems, equations, algorithms, scientific processes, coding concepts, or any detailed walkthrough), you MUST format your response using these special markers exactly:
 
 [WHITEBOARD_START]
-## Title: [Short descriptive title of the problem]
+## Title: <Short descriptive title in plain text>
 
 ### Problem
-[State the original problem clearly]
+State the original problem clearly. If the user asks to "solve" and provides only an expression (e.g. x^2 - x + 9), treat it as an equation set to zero and write it as display math:
+$$x^2 - x + 9 = 0$$
 
 ### Solution
-
-**Step 1:** [First step description]
-$$[LaTeX math expression if applicable]$$
-
-**Step 2:** [Second step description]  
-$$[LaTeX math]$$
-
-[Continue with more steps as needed...]
+Write numbered steps. Always include real formulas when needed (never placeholders), e.g.:
+$$D = b^2 - 4ac$$
+$$x = \frac{-b \pm \sqrt{D}}{2a}$$
 
 ### Answer
-[Final answer with explanation]
+Give the final answer.
 [WHITEBOARD_END]
 
 Use LaTeX notation for all mathematical expressions:
