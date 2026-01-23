@@ -13,6 +13,7 @@ interface AvatarPanelProps {
   onMicPress: () => void;
   onMicRelease: () => void;
   audioLevel: number;
+  isConnected: boolean;
   onSimliReady?: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
 }
 
@@ -44,6 +45,7 @@ export const AvatarPanel = ({
   onMicPress,
   onMicRelease,
   audioLevel,
+  isConnected,
   onSimliReady,
 }: AvatarPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -52,16 +54,30 @@ export const AvatarPanel = ({
   const [isSimliReady, setIsSimliReady] = useState(false);
   const [simliError, setSimliError] = useState<string | null>(null);
 
-  // Initialize Simli client
+  // Initialize Simli client when connected
   useEffect(() => {
+    // Only initialize when connected
+    if (!isConnected) {
+      // Clean up when disconnected
+      if (simliClientRef.current) {
+        console.log("Cleaning up Simli client on disconnect");
+        simliClientRef.current.close();
+        simliClientRef.current = null;
+        setIsSimliReady(false);
+      }
+      return;
+    }
+
     let isMounted = true;
     
     const initSimli = async () => {
       try {
         // Close any existing session first
         if (simliClientRef.current) {
+          console.log("Closing existing Simli session before reinit");
           simliClientRef.current.close();
           simliClientRef.current = null;
+          setIsSimliReady(false);
         }
         
         console.log("Initializing Simli with face:", AVATAR_FACE_ID);
@@ -151,6 +167,12 @@ export const AvatarPanel = ({
     return () => {
       isMounted = false;
       clearTimeout(timer);
+    };
+  }, [isConnected, onSimliReady]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
       if (simliClientRef.current) {
         simliClientRef.current.close();
         simliClientRef.current = null;
