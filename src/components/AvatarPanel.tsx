@@ -4,7 +4,7 @@ import { SimliClient } from "simli-client";
 import { supabase } from "@/integrations/supabase/client";
 
 // Fixed avatar configuration
-const AVATAR_FACE_ID = "5fc23ea5-8175-4a82-aaaf-cdd8c88543dc";
+const AVATAR_FACE_ID = "0a232d7a-6ca0-4890-99b2-b35eff43d319";
 const AVATAR_NAME = "Aria";
 
 interface AvatarPanelProps {
