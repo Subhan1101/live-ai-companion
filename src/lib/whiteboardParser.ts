@@ -1,5 +1,5 @@
 export interface WhiteboardSection {
-  type: 'title' | 'step' | 'math' | 'answer' | 'text' | 'problem';
+  type: 'title' | 'step' | 'math' | 'answer' | 'text' | 'problem' | 'overview' | 'keypoints' | 'tips' | 'summary';
   content: string;
   stepNumber?: number;
 }
@@ -41,7 +41,7 @@ export function sanitizeLatex(latex: string): string {
 }
 
 /**
- * Checks if text contains whiteboard content markers or math expressions
+ * Checks if text contains whiteboard content markers or educational content
  */
 export function hasWhiteboardContent(text: string): boolean {
   const startMarker = '[WHITEBOARD_START]';
@@ -51,12 +51,16 @@ export function hasWhiteboardContent(text: string): boolean {
     return true;
   }
   
-  // Also check for math expressions that could benefit from whiteboard display
-  // Look for LaTeX patterns: $...$, $$...$$, \(...\), \[...\]
+  // Check for math expressions
   const hasMath = /\$[^$]+\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]/.test(text);
   const hasSteps = /\*\*Step\s*\d+:?\*\*/i.test(text) || /^Step\s*\d+:/im.test(text);
   
-  return hasMath && hasSteps;
+  // Check for educational/structured content patterns
+  const hasKeyPoints = /\*\*(Key Points?|Tips?|Strategy|Overview|Summary):?\*\*/i.test(text);
+  const hasNumberedList = /^\d+\.\s+\*\*/m.test(text);
+  const hasHeaders = /^###?\s+(Problem|Solution|Answer|Overview|Key Points|Tips|Strategy|Summary)/im.test(text);
+  
+  return (hasMath && hasSteps) || hasKeyPoints || (hasNumberedList && hasHeaders);
 }
 
 /**
@@ -164,6 +168,34 @@ export function parseWhiteboardContent(content: string): ParsedWhiteboard {
     if (line.match(/^###?\s*Problem/i)) {
       if (currentSection) sections.push(currentSection);
       currentSection = { type: 'problem', content: '' };
+      continue;
+    }
+    
+    // Overview section
+    if (line.match(/^###?\s*Overview/i)) {
+      if (currentSection) sections.push(currentSection);
+      currentSection = { type: 'overview', content: '' };
+      continue;
+    }
+    
+    // Key Points section
+    if (line.match(/^###?\s*Key\s*Points?/i)) {
+      if (currentSection) sections.push(currentSection);
+      currentSection = { type: 'keypoints', content: '' };
+      continue;
+    }
+    
+    // Tips / Strategy section
+    if (line.match(/^###?\s*(Tips?|Strategy)/i)) {
+      if (currentSection) sections.push(currentSection);
+      currentSection = { type: 'tips', content: '' };
+      continue;
+    }
+    
+    // Summary section
+    if (line.match(/^###?\s*Summary/i)) {
+      if (currentSection) sections.push(currentSection);
+      currentSection = { type: 'summary', content: '' };
       continue;
     }
     
