@@ -126,6 +126,46 @@ const WhiteboardModal = ({ open, onOpenChange, content }: WhiteboardModalProps) 
                     </div>
                   );
 
+                case 'overview':
+                  return (
+                    <div key={index} className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                      <h3 className="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-2">📋 Overview</h3>
+                      <div className="text-foreground">
+                        <TextWithMath text={section.content} />
+                      </div>
+                    </div>
+                  );
+
+                case 'keypoints':
+                  return (
+                    <div key={index} className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <h3 className="text-sm font-semibold text-amber-600 dark:text-amber-400 mb-3">🔑 Key Points</h3>
+                      <div className="text-foreground space-y-2">
+                        <TextWithMath text={section.content} />
+                      </div>
+                    </div>
+                  );
+
+                case 'tips':
+                  return (
+                    <div key={index} className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                      <h3 className="text-sm font-semibold text-purple-600 dark:text-purple-400 mb-2">💡 Tips & Strategy</h3>
+                      <div className="text-foreground">
+                        <TextWithMath text={section.content} />
+                      </div>
+                    </div>
+                  );
+
+                case 'summary':
+                  return (
+                    <div key={index} className="p-4 rounded-lg bg-green-500/10 border border-green-500/20">
+                      <h3 className="text-sm font-semibold text-green-600 dark:text-green-400 mb-2">📝 Summary</h3>
+                      <div className="text-foreground">
+                        <TextWithMath text={section.content} />
+                      </div>
+                    </div>
+                  );
+
                 case 'step':
                   return (
                     <div key={index} className="flex gap-4">
