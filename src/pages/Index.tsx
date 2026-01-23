@@ -250,6 +250,7 @@ const Index = () => {
               onMicPress={handleMicPress}
               onMicRelease={handleMicRelease}
               audioLevel={audioLevel}
+              isConnected={isConnected}
               onSimliReady={handleSimliReady}
             />
           </div>
