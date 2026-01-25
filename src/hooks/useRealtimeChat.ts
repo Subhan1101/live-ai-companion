@@ -392,22 +392,23 @@ ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation 
                 startAutoListening();
               }
               
-              // Start heartbeat to keep connection alive (every 25 seconds)
+              // Start heartbeat to keep connection alive (every 15 seconds)
+              // More frequent heartbeats help prevent session timeouts around 3 minutes
               if (heartbeatIntervalRef.current) {
                 clearInterval(heartbeatIntervalRef.current);
               }
               heartbeatIntervalRef.current = window.setInterval(() => {
                 if (wsRef.current?.readyState === WebSocket.OPEN) {
-                  // Send a minimal session.update to keep connection alive
+                  // Send a minimal audio buffer to keep connection alive
                   // This is a lightweight ping that OpenAI accepts
                   wsRef.current.send(JSON.stringify({
                     type: "input_audio_buffer.append",
-                     // Send a tiny chunk of silence (1 sample) to avoid some servers closing on empty payloads.
-                     audio: "AA=="
+                    // Send a tiny chunk of silence (1 sample) to avoid some servers closing on empty payloads.
+                    audio: "AA=="
                   }));
                   console.log("Heartbeat sent to keep connection alive");
                 }
-              }, 25000); // Every 25 seconds
+              }, 15000); // Every 15 seconds (reduced from 25s)
               break;
 
             case "input_audio_buffer.speech_started":

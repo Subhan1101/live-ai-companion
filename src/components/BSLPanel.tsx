@@ -67,20 +67,45 @@ export const BSLPanel = ({ text, isActive, onSignComplete, className = '' }: BSL
   const [signs, setSigns] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const intervalRef = useRef<number | null>(null);
+  const lastTextRef = useRef<string>('');
 
-  // Parse text into signs when text changes
+  // Parse text into signs when text changes.
+  // STREAMING-AWARE: If new text is an extension of old text (streaming), 
+  // only add new signs without resetting currentSignIndex.
   useEffect(() => {
-    if (text) {
+    if (!text) return;
+    
+    const newSigns = textToSigns(text);
+    
+    // Check if this is a streaming extension (new text starts with old text)
+    const isExtension = text.startsWith(lastTextRef.current) && lastTextRef.current.length > 0;
+    
+    if (isExtension) {
+      // Streaming update - just extend the signs array without resetting playback position
+      setSigns(newSigns);
+      // Keep isPlaying true if we were already playing
+      if (!isPlaying && newSigns.length > 0) {
+        setIsPlaying(true);
+      }
+    } else {
+      // New text entirely - reset and start from beginning
       setIsLoading(true);
-      const newSigns = textToSigns(text);
       setSigns(newSigns);
       setCurrentSignIndex(0);
       setIsPlaying(true);
       setIsLoading(false);
     }
-  }, [text]);
+    
+    lastTextRef.current = text;
+  }, [text, isPlaying]);
 
-  // Playback logic
+  // Stable reference to onSignComplete to prevent timer resets
+  const onSignCompleteRef = useRef(onSignComplete);
+  useEffect(() => {
+    onSignCompleteRef.current = onSignComplete;
+  }, [onSignComplete]);
+
+  // Playback logic - uses ref for callback to avoid timer resets on parent re-renders
   useEffect(() => {
     if (isPlaying && signs.length > 0 && currentSignIndex < signs.length) {
       const delay = signs[currentSignIndex] === ' ' ? 300 : 800 / playbackSpeed;
@@ -90,7 +115,7 @@ export const BSLPanel = ({ text, isActive, onSignComplete, className = '' }: BSL
           const next = prev + 1;
           if (next >= signs.length) {
             setIsPlaying(false);
-            onSignComplete?.();
+            onSignCompleteRef.current?.();
             return prev;
           }
           return next;
@@ -103,7 +128,7 @@ export const BSLPanel = ({ text, isActive, onSignComplete, className = '' }: BSL
         clearTimeout(intervalRef.current);
       }
     };
-  }, [isPlaying, currentSignIndex, signs, playbackSpeed, onSignComplete]);
+  }, [isPlaying, currentSignIndex, signs, playbackSpeed]);
 
   const togglePlayback = useCallback(() => {
     setIsPlaying(prev => !prev);

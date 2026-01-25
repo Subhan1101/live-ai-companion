@@ -65,17 +65,18 @@ serve(async (req) => {
         clientSocket.send(JSON.stringify({ type: "proxy.openai_connected" }));
       }
       
-      // Start keepalive ping to OpenAI every 20 seconds
+      // Start keepalive ping to OpenAI every 12 seconds (reduced from 20s)
+      // More frequent pings help prevent session timeouts around 3 minutes
       keepaliveInterval = setInterval(() => {
         if (openaiSocket?.readyState === WebSocket.OPEN) {
-          // Send empty audio buffer as keepalive
+          // Send minimal audio buffer as keepalive
           openaiSocket.send(JSON.stringify({
             type: "input_audio_buffer.append",
-            audio: ""
+            audio: "AA==" // 1 sample of silence
           }));
           console.log("Keepalive ping sent to OpenAI");
         }
-      }, 20000);
+      }, 12000);
     };
 
     openaiSocket.onmessage = (event) => {
