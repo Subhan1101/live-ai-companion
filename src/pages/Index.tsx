@@ -277,20 +277,23 @@ const Index = () => {
     setIsBSLLoading(false);
   }, [isBSLEnabled, sendBSLModeChange]);
 
-  // Update BSL response text only when the assistant finishes a response.
-  // This prevents the BSL panel from constantly resetting during token streaming.
+  // Update BSL response text when a NEW assistant message appears (by ID).
+  // We track the message ID to avoid resetting the signing animation on every streaming token.
+  // Unlike before, we do NOT wait for isProcessing to be false — we want to start signing
+  // as soon as a new message ID is detected (even if still streaming).
   useEffect(() => {
     if (!isBSLEnabled) return;
-    if (isProcessing) return;
 
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant) return;
 
+    // Only update when the message ID changes (new message started)
     if (lastBSLAssistantMessageIdRef.current === lastAssistant.id) return;
     lastBSLAssistantMessageIdRef.current = lastAssistant.id;
 
+    // Start with whatever content we have now; the signing will begin immediately
     setBslResponseText(lastAssistant.content);
-  }, [messages, isBSLEnabled, isProcessing]);
+  }, [messages, isBSLEnabled]);
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
