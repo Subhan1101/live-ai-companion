@@ -47,6 +47,8 @@ serve(async (req) => {
 
   let openaiSocket: WebSocket | null = null;
 
+  let keepaliveInterval: number | null = null;
+
   clientSocket.onopen = () => {
     console.log("Client connected, establishing connection to OpenAI...");
 
@@ -62,6 +64,18 @@ serve(async (req) => {
       if (clientSocket.readyState === WebSocket.OPEN) {
         clientSocket.send(JSON.stringify({ type: "proxy.openai_connected" }));
       }
+      
+      // Start keepalive ping to OpenAI every 20 seconds
+      keepaliveInterval = setInterval(() => {
+        if (openaiSocket?.readyState === WebSocket.OPEN) {
+          // Send empty audio buffer as keepalive
+          openaiSocket.send(JSON.stringify({
+            type: "input_audio_buffer.append",
+            audio: ""
+          }));
+          console.log("Keepalive ping sent to OpenAI");
+        }
+      }, 20000);
     };
 
     openaiSocket.onmessage = (event) => {
@@ -85,6 +99,12 @@ serve(async (req) => {
 
     openaiSocket.onclose = (event) => {
       console.log("OpenAI connection closed:", event.code, event.reason);
+
+      // Clear keepalive interval
+      if (keepaliveInterval) {
+        clearInterval(keepaliveInterval);
+        keepaliveInterval = null;
+      }
 
       // Surface common auth failures explicitly to the client
       const reason = String(event.reason ?? "");
@@ -128,6 +148,10 @@ serve(async (req) => {
 
   clientSocket.onclose = () => {
     console.log("Client disconnected");
+    if (keepaliveInterval) {
+      clearInterval(keepaliveInterval);
+      keepaliveInterval = null;
+    }
     if (openaiSocket) {
       openaiSocket.close();
       openaiSocket = null;

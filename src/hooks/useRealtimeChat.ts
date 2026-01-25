@@ -64,6 +64,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioQueueRef = useRef<AudioQueue | null>(null);
   const audioLevelIntervalRef = useRef<number | null>(null);
+  const heartbeatIntervalRef = useRef<number | null>(null);
   const sessionCreatedRef = useRef(false);
   const isListeningRef = useRef(false);
   // Placeholder message IDs created on speech end, waiting to be associated with an OpenAI user item
@@ -231,15 +232,19 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
             case "proxy.openai_closed": {
               console.error("OpenAI connection closed (via proxy):", data);
 
+              const isKeepaliveTimeout = data.code === 1005 || data.code === 1011;
+              
               const description =
-                typeof data.reason === "string" && data.reason.length > 0
-                  ? `Code ${data.code}: ${data.reason}`
-                  : typeof data.code === "number"
-                    ? `Code ${data.code}`
-                    : "Connection closed";
+                isKeepaliveTimeout
+                  ? "The session was idle too long. Please reconnect to continue."
+                  : typeof data.reason === "string" && data.reason.length > 0
+                    ? `Code ${data.code}: ${data.reason}`
+                    : typeof data.code === "number"
+                      ? `Code ${data.code}`
+                      : "Connection closed";
 
               toast({
-                title: "Voice connection closed",
+                title: isKeepaliveTimeout ? "Session timed out" : "Voice connection closed",
                 description,
                 variant: "destructive",
               });
@@ -385,6 +390,22 @@ ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation 
               if (!isListeningRef.current) {
                 startAutoListening();
               }
+              
+              // Start heartbeat to keep connection alive (every 25 seconds)
+              if (heartbeatIntervalRef.current) {
+                clearInterval(heartbeatIntervalRef.current);
+              }
+              heartbeatIntervalRef.current = window.setInterval(() => {
+                if (wsRef.current?.readyState === WebSocket.OPEN) {
+                  // Send a minimal session.update to keep connection alive
+                  // This is a lightweight ping that OpenAI accepts
+                  wsRef.current.send(JSON.stringify({
+                    type: "input_audio_buffer.append",
+                    audio: "" // Empty audio - just keeps connection alive
+                  }));
+                  console.log("Heartbeat sent to keep connection alive");
+                }
+              }, 25000); // Every 25 seconds
               break;
 
             case "input_audio_buffer.speech_started":
@@ -690,6 +711,12 @@ ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation 
     if (audioLevelIntervalRef.current) {
       clearInterval(audioLevelIntervalRef.current);
       audioLevelIntervalRef.current = null;
+    }
+
+    // Clear heartbeat interval
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
     }
 
     if (wsRef.current) {
