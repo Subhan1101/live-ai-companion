@@ -165,16 +165,23 @@ export const BSLPanel = ({ text, isActive, onSignComplete, className = '' }: BSL
             <p className="text-sm text-muted-foreground">Preparing signs...</p>
           </div>
         ) : signs.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 text-center">
-            <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center">
-              <Hand className="w-10 h-10 text-muted-foreground" />
+          <div className="flex flex-col items-center gap-3 text-center px-4">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border-2 border-primary/30">
+              <Hand className="w-10 h-10 text-primary" />
             </div>
-            <p className="text-sm text-muted-foreground">
-              Waiting for teacher response...
-            </p>
-            <p className="text-xs text-muted-foreground">
-              BSL signs will appear here
-            </p>
+            <div>
+              <p className="text-sm font-medium text-foreground mb-1">
+                BSL Mode Active
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Ask the teacher a question! The response will be shown here as BSL hand signs.
+              </p>
+            </div>
+            <div className="mt-2 px-3 py-2 bg-primary/10 rounded-lg">
+              <p className="text-xs text-primary">
+                💡 Tip: Ask short questions for clearer sign responses
+              </p>
+            </div>
           </div>
         ) : (
           <>
