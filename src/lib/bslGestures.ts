@@ -482,6 +482,183 @@ export const commonSigns: BSLSign[] = [
         .filter(Boolean).length / 5;
       return score > 0.8 ? score : 0;
     }
+  },
+  // === EDUCATION WORDS ===
+  {
+    name: 'Learn',
+    description: 'Hand from head pulling knowledge out',
+    category: 'word',
+    detector: (landmarks) => {
+      // Open hand near face
+      const indexExtended = isFingerExtended(landmarks, 5, 8);
+      const middleExtended = isFingerExtended(landmarks, 9, 12);
+      const wrist = landmarks[0];
+      const indexTip = landmarks[8];
+      
+      // Hand should be relatively high (near face)
+      const handHigh = wrist.y < 0.5;
+      
+      const score = [indexExtended, middleExtended, handHigh]
+        .filter(Boolean).length / 3;
+      return score > 0.6 ? score : 0;
+    }
+  },
+  {
+    name: 'Think',
+    description: 'Index finger pointing to temple',
+    category: 'word',
+    detector: (landmarks) => {
+      const indexExtended = isFingerExtended(landmarks, 5, 8);
+      const middleCurled = isFingerCurled(landmarks, 9, 12);
+      const ringCurled = isFingerCurled(landmarks, 13, 16);
+      const pinkyCurled = isFingerCurled(landmarks, 17, 20);
+      
+      // Hand should be near head height
+      const wrist = landmarks[0];
+      const handHigh = wrist.y < 0.4;
+      
+      const score = [indexExtended, middleCurled, ringCurled, pinkyCurled, handHigh]
+        .filter(Boolean).length / 5;
+      return score > 0.7 ? score : 0;
+    }
+  },
+  {
+    name: 'Understand',
+    description: 'Index finger flicking up from forehead',
+    category: 'word',
+    detector: (landmarks) => {
+      const indexExtended = isFingerExtended(landmarks, 5, 8);
+      const thumbExtended = isFingerExtended(landmarks, 1, 4);
+      const wrist = landmarks[0];
+      const handHigh = wrist.y < 0.4;
+      
+      return (indexExtended && thumbExtended && handHigh) ? 0.75 : 0.2;
+    }
+  },
+  {
+    name: 'Computer',
+    description: 'C-shape moving from side to side',
+    category: 'word',
+    detector: (landmarks) => {
+      // C-shape hand
+      const thumbTip = landmarks[4];
+      const indexTip = landmarks[8];
+      const openGap = getDistance(thumbTip, indexTip) > 0.1;
+      
+      return openGap ? 0.7 : 0.2;
+    }
+  },
+  {
+    name: 'Science',
+    description: 'Two hands alternating pouring motion',
+    category: 'word',
+    detector: (landmarks) => {
+      const thumbExtended = isFingerExtended(landmarks, 1, 4);
+      const indexExtended = isFingerExtended(landmarks, 5, 8);
+      
+      return (thumbExtended && indexExtended) ? 0.65 : 0.2;
+    }
+  },
+  {
+    name: 'Math',
+    description: 'X-crossing motion with index fingers',
+    category: 'word',
+    detector: (landmarks) => {
+      const indexExtended = isFingerExtended(landmarks, 5, 8);
+      const middleExtended = isFingerExtended(landmarks, 9, 12);
+      const ringCurled = isFingerCurled(landmarks, 13, 16);
+      
+      const score = [indexExtended, middleExtended, ringCurled]
+        .filter(Boolean).length / 3;
+      return score > 0.6 ? score : 0;
+    }
+  },
+  {
+    name: 'Book',
+    description: 'Palms together opening like a book',
+    category: 'word',
+    detector: (landmarks) => {
+      const indexExtended = isFingerExtended(landmarks, 5, 8);
+      const middleExtended = isFingerExtended(landmarks, 9, 12);
+      const ringExtended = isFingerExtended(landmarks, 13, 16);
+      const pinkyExtended = isFingerExtended(landmarks, 17, 20);
+      
+      // Flat hand
+      const score = [indexExtended, middleExtended, ringExtended, pinkyExtended]
+        .filter(Boolean).length / 4;
+      return score > 0.8 ? score * 0.85 : 0;
+    }
+  },
+  {
+    name: 'Write',
+    description: 'Writing motion on palm',
+    category: 'word',
+    detector: (landmarks) => {
+      const indexExtended = isFingerExtended(landmarks, 5, 8);
+      const middleCurled = isFingerCurled(landmarks, 9, 12);
+      const thumbExtended = isFingerExtended(landmarks, 1, 4);
+      
+      // Pinch grip for writing
+      const thumbIndexClose = areFingersTouching(landmarks, 4, 8, 0.08);
+      
+      const score = [thumbIndexClose || (indexExtended && thumbExtended), middleCurled]
+        .filter(Boolean).length / 2;
+      return score > 0.5 ? 0.7 : 0.2;
+    }
+  },
+  {
+    name: 'Read',
+    description: 'Two fingers scanning across palm',
+    category: 'word',
+    detector: (landmarks) => {
+      const indexExtended = isFingerExtended(landmarks, 5, 8);
+      const middleExtended = isFingerExtended(landmarks, 9, 12);
+      const ringCurled = isFingerCurled(landmarks, 13, 16);
+      const pinkyCurled = isFingerCurled(landmarks, 17, 20);
+      
+      const score = [indexExtended, middleExtended, ringCurled, pinkyCurled]
+        .filter(Boolean).length / 4;
+      return score > 0.7 ? score : 0;
+    }
+  },
+  // === TECHNOLOGY WORDS ===
+  {
+    name: 'AI',
+    description: 'A then I fingerspelling',
+    category: 'word',
+    detector: (landmarks) => {
+      // AI is often signed as A-I fingerspelling
+      const indexCurled = isFingerCurled(landmarks, 5, 8);
+      const middleCurled = isFingerCurled(landmarks, 9, 12);
+      const thumbExtended = isFingerExtended(landmarks, 1, 4);
+      
+      const score = [indexCurled, middleCurled, thumbExtended]
+        .filter(Boolean).length / 3;
+      return score > 0.6 ? score : 0;
+    }
+  },
+  {
+    name: 'Technology',
+    description: 'Middle finger tapping wrist',
+    category: 'word',
+    detector: (landmarks) => {
+      const middleExtended = isFingerExtended(landmarks, 9, 12);
+      const indexCurled = isFingerCurled(landmarks, 5, 8);
+      
+      return (middleExtended && indexCurled) ? 0.7 : 0.2;
+    }
+  },
+  {
+    name: 'Internet',
+    description: 'Connected fingers web motion',
+    category: 'word',
+    detector: (landmarks) => {
+      // All fingers touching each other at tips
+      const indexMiddleTouch = areFingersTouching(landmarks, 8, 12, 0.06);
+      const middleRingTouch = areFingersTouching(landmarks, 12, 16, 0.06);
+      
+      return (indexMiddleTouch || middleRingTouch) ? 0.7 : 0.2;
+    }
   }
 ];
 
