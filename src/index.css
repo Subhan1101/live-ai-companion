@@ -202,7 +202,7 @@ All colors MUST be HSL.
   }
 
   .transcript-bubble-ai {
-    @apply bg-accent text-accent-foreground rounded-tl-sm;
+    @apply bg-accent text-foreground rounded-tl-sm;
   }
 
   .transcript-bubble-user {
