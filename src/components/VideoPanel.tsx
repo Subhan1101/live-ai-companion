@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Video, VideoOff } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Mic, MicOff, Video, VideoOff, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface VideoPanelProps {
   userName: string;
@@ -13,6 +14,8 @@ export const VideoPanel = ({ userName, isSpeaking, isMuted, isCameraOn = true }:
   const [hasVideo, setHasVideo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamActive, setStreamActive] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // Get user initials for placeholder
   const getInitials = (name: string) => {
@@ -24,52 +27,77 @@ export const VideoPanel = ({ userName, isSpeaking, isMuted, isCameraOn = true }:
       .slice(0, 2);
   };
 
+  const initCamera = useCallback(async () => {
+    if (!isCameraOn) {
+      setHasVideo(false);
+      setStreamActive(false);
+      return;
+    }
+
+    setIsRetrying(true);
+    setError(null);
+
+    try {
+      console.log("Requesting camera access...");
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: 640, height: 480 },
+        audio: false,
+      });
+      
+      streamRef.current = stream;
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        // Wait for video to be ready
+        videoRef.current.onloadedmetadata = () => {
+          console.log("Video metadata loaded");
+          setHasVideo(true);
+          setStreamActive(true);
+          setError(null);
+          setIsRetrying(false);
+        };
+      }
+    } catch (err: any) {
+      console.error("Camera access error:", err);
+      
+      // Provide helpful error messages
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        setError("Camera permission denied. Click below to retry.");
+      } else if (err.name === "NotFoundError") {
+        setError("No camera found on this device.");
+      } else if (err.name === "NotReadableError") {
+        setError("Camera is in use by another app.");
+      } else {
+        setError("Could not access camera.");
+      }
+      
+      setHasVideo(false);
+      setStreamActive(false);
+      setIsRetrying(false);
+    }
+  }, [isCameraOn]);
+
+  const handleRetryCamera = useCallback(() => {
+    // Stop existing stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    initCamera();
+  }, [initCamera]);
+
   useEffect(() => {
-    let stream: MediaStream | null = null;
-
-    const initCamera = async () => {
-      if (!isCameraOn) {
-        setHasVideo(false);
-        setStreamActive(false);
-        return;
-      }
-
-      try {
-        console.log("Requesting camera access...");
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: 640, height: 480 },
-          audio: false,
-        });
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          // Wait for video to be ready
-          videoRef.current.onloadedmetadata = () => {
-            console.log("Video metadata loaded");
-            setHasVideo(true);
-            setStreamActive(true);
-            setError(null);
-          };
-        }
-      } catch (err) {
-        console.error("Camera access error:", err);
-        setError("Camera access denied");
-        setHasVideo(false);
-        setStreamActive(false);
-      }
-    };
-
     initCamera();
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach((track) => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => {
           track.stop();
           console.log("Camera track stopped");
         });
       }
     };
-  }, [isCameraOn]);
+  }, [isCameraOn, initCamera]);
 
   return (
     <div className="panel-card flex flex-col h-full relative overflow-hidden">
@@ -88,7 +116,7 @@ export const VideoPanel = ({ userName, isSpeaking, isMuted, isCameraOn = true }:
         
         {/* Placeholder when no video */}
         {(!hasVideo || !isCameraOn) && (
-          <div className="flex flex-col items-center justify-center gap-4">
+          <div className="flex flex-col items-center justify-center gap-4 p-4">
             {/* User avatar circle */}
             <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-3xl font-bold">
               {getInitials(userName)}
@@ -97,10 +125,31 @@ export const VideoPanel = ({ userName, isSpeaking, isMuted, isCameraOn = true }:
             {/* Status message */}
             <div className="text-white/60 text-sm text-center">
               {error ? (
-                <span className="flex items-center gap-2">
-                  <VideoOff className="w-4 h-4" />
-                  {error}
-                </span>
+                <div className="flex flex-col items-center gap-3">
+                  <span className="flex items-center gap-2">
+                    <VideoOff className="w-4 h-4" />
+                    {error}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRetryCamera}
+                    disabled={isRetrying}
+                    className="bg-white/10 border-white/20 text-white hover:bg-white/20"
+                  >
+                    {isRetrying ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Requesting...
+                      </>
+                    ) : (
+                      <>
+                        <Video className="w-4 h-4 mr-2" />
+                        Enable Camera
+                      </>
+                    )}
+                  </Button>
+                </div>
               ) : !isCameraOn ? (
                 <span className="flex items-center gap-2">
                   <VideoOff className="w-4 h-4" />

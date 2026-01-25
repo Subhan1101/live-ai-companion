@@ -28,6 +28,7 @@ const Index = () => {
     setSimliAudioHandler,
     sendImage,
     sendTextContent,
+    sendBSLModeChange,
     whiteboardContent,
     showWhiteboard,
     openWhiteboard,
@@ -242,13 +243,26 @@ const Index = () => {
   };
 
   const handleToggleBSL = useCallback(() => {
+    if (!isConnected) {
+      toast({
+        title: "Not connected",
+        description: "Please wait for the connection to be established.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsBSLLoading(true);
     setIsBSLEnabled(prev => {
       const next = !prev;
+      
+      // Notify the AI about BSL mode change
+      sendBSLModeChange(next);
+      
       if (next) {
         toast({
           title: "BSL Mode Enabled",
-          description: "British Sign Language input/output is now active.",
+          description: "The AI teacher will now respond in a BSL-friendly way with short, clear sentences.",
         });
       } else {
         toast({
@@ -259,7 +273,7 @@ const Index = () => {
       setIsBSLLoading(false);
       return next;
     });
-  }, []);
+  }, [isConnected, sendBSLModeChange]);
 
   // Update BSL response text when new assistant message arrives
   useEffect(() => {

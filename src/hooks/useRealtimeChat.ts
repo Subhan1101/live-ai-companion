@@ -39,6 +39,7 @@ interface UseRealtimeChatReturn {
   setSimliAudioHandler: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
   sendImage: (base64: string, mimeType: string, prompt?: string) => void;
   sendTextContent: (text: string, fileName?: string) => void;
+  sendBSLModeChange: (enabled: boolean) => void;
   whiteboardContent: string;
   showWhiteboard: boolean;
   openWhiteboard: (content: string) => void;
@@ -925,6 +926,53 @@ ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation 
     setShowWhiteboard(false);
   }, []);
 
+  // Notify AI when BSL mode is toggled
+  const sendBSLModeChange = useCallback((enabled: boolean) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.log("Cannot send BSL mode change: WebSocket not open");
+      return;
+    }
+
+    console.log("Notifying AI of BSL mode change:", enabled);
+
+    const itemId = crypto.randomUUID();
+    const message = enabled
+      ? `[SYSTEM NOTE: BSL (British Sign Language) mode has been ENABLED. The student is deaf or hard-of-hearing and communicates using sign language. 
+
+IMPORTANT INSTRUCTIONS FOR BSL MODE:
+1. Keep your responses SHORT and SIMPLE - no more than 2-3 sentences at a time
+2. Use clear, concrete vocabulary that translates well to sign language
+3. Avoid idioms, metaphors, and complex sentence structures
+4. Break down concepts into small, visual steps
+5. When explaining topics, describe them in ways that can be shown with hand gestures
+6. The BSL panel will convert your words to sign animations - shorter responses work better
+7. Ask "Do you understand?" frequently and wait for student response
+8. Focus on one concept at a time
+
+Your text will be displayed alongside BSL hand sign animations. Please adapt your teaching style accordingly.]`
+      : `[SYSTEM NOTE: BSL mode has been DISABLED. The student is now using voice communication. You can return to normal conversational teaching style with longer explanations if needed.]`;
+
+    wsRef.current.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          id: itemId,
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: message,
+            },
+          ],
+        },
+      })
+    );
+
+    // Note: We don't trigger a response here - just inform the AI
+    // The AI will use this context for future responses
+  }, []);
+
   return {
     messages,
     partialTranscript,
@@ -941,6 +989,7 @@ ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation 
     setSimliAudioHandler,
     sendImage,
     sendTextContent,
+    sendBSLModeChange,
     whiteboardContent,
     showWhiteboard,
     openWhiteboard,
