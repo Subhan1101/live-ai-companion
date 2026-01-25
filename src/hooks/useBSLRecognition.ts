@@ -37,6 +37,7 @@ export const useBSLRecognition = (
   const lastSignRef = useRef<BSLRecognitionResult | null>(null);
   const signBufferRef = useRef<string[]>([]);
   const lastDetectionRef = useRef<number>(0);
+  const isEnabledRef = useRef(false); // Track enabled state for frame loop
 
   // Load MediaPipe Hands
   const loadMediaPipe = useCallback(async () => {
@@ -143,17 +144,29 @@ export const useBSLRecognition = (
       return;
     }
 
+    console.log('Starting BSL detection...');
+    setIsLoading(true);
+
     let hands = handsRef.current;
     
     if (!hands) {
       hands = await loadMediaPipe();
-      if (!hands) return;
+      if (!hands) {
+        setIsLoading(false);
+        return;
+      }
     }
 
+    setIsLoading(false);
     const video = videoRef.current;
     
     const processFrame = async () => {
-      if (!isEnabled || !video || video.readyState !== 4) {
+      // Use ref to check enabled state (avoids stale closure)
+      if (!isEnabledRef.current) {
+        return; // Stop loop when disabled
+      }
+      
+      if (!video || video.readyState !== 4) {
         animationRef.current = requestAnimationFrame(processFrame);
         return;
       }
@@ -168,7 +181,7 @@ export const useBSLRecognition = (
     };
 
     animationRef.current = requestAnimationFrame(processFrame);
-  }, [videoRef, loadMediaPipe, isEnabled]);
+  }, [videoRef, loadMediaPipe]);
 
   // Stop detection
   const stopDetection = useCallback(() => {
@@ -186,6 +199,8 @@ export const useBSLRecognition = (
   const toggleBSL = useCallback(() => {
     setIsEnabled(prev => {
       const next = !prev;
+      isEnabledRef.current = next; // Keep ref in sync
+      console.log('BSL mode toggled:', next);
       if (!next) {
         stopDetection();
       }
@@ -208,6 +223,7 @@ export const useBSLRecognition = (
 
   // Start/stop detection when enabled changes
   useEffect(() => {
+    isEnabledRef.current = isEnabled; // Keep ref in sync
     if (isEnabled) {
       startDetection();
     } else {
