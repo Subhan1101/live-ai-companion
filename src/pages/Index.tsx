@@ -304,6 +304,17 @@ const Index = () => {
     }
   }, [messages, isBSLEnabled]);
 
+  // Handle BSL input from camera (sign language to text)
+  const handleBSLInput = useCallback((text: string) => {
+    if (!isConnected || !text.trim()) return;
+    
+    sendTextContent(text, "BSL Input");
+    toast({
+      title: "BSL Input Sent",
+      description: `Sent: "${text}"`,
+    });
+  }, [isConnected, sendTextContent]);
+
   // Memoized callback to prevent BSLPanel from resetting on every parent render
   const handleBSLSignComplete = useCallback(() => {
     console.log("BSL sign sequence complete");
@@ -336,6 +347,7 @@ const Index = () => {
               isSpeaking={isRecording}
               isMuted={!isMicOn}
               isCameraOn={isCameraOn}
+              onBSLInput={handleBSLInput}
             />
           </div>
 

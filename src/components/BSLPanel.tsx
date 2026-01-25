@@ -24,15 +24,85 @@ const signLibrary: Record<string, string> = {
   // Numbers
   '0': '👌', '1': '☝️', '2': '✌️', '3': '🤟', '4': '🖐️',
   '5': '🖐️', '6': '🤙', '7': '🤟', '8': '🤘', '9': '👆',
-  // Common words
-  'HELLO': '👋', 'GOODBYE': '👋', 'THANK': '🙏', 'YOU': '👆',
-  'PLEASE': '🙏', 'SORRY': '✊', 'YES': '👍', 'NO': '👎',
-  'HELP': '👍', 'GOOD': '👍', 'BAD': '👎', 'LOVE': '🤟',
-  'FRIEND': '🤝', 'FAMILY': '👨‍👩‍👧', 'SCHOOL': '📚', 'LEARN': '📖',
-  'TEACHER': '👨‍🏫', 'STUDENT': '👨‍🎓', 'QUESTION': '❓', 'ANSWER': '💬',
-  'UNDERSTAND': '💡', 'DONT': '🚫', 'KNOW': '🧠', 'THINK': '🤔',
-  'WANT': '👈', 'NEED': '👐', 'LIKE': '👍', 'HAPPY': '😊',
-  'SAD': '😢', 'ANGRY': '😠', 'TIRED': '😴', 'HUNGRY': '🍽️',
+  
+  // === EDUCATION & TECHNOLOGY WORDS ===
+  'ARTIFICIAL': '🤖', 'INTELLIGENCE': '🧠', 'AI': '🤖',
+  'COMPUTER': '💻', 'TECHNOLOGY': '⚙️', 'DIGITAL': '📱',
+  'LEARN': '📖', 'LEARNING': '📖', 'STUDY': '📚', 'STUDYING': '📚',
+  'TEACH': '👨‍🏫', 'TEACHING': '👨‍🏫', 'EDUCATION': '🎓',
+  'SCIENCE': '🔬', 'MATH': '🔢', 'MATHS': '🔢', 'MATHEMATICS': '🔢',
+  'PHYSICS': '⚛️', 'CHEMISTRY': '🧪', 'BIOLOGY': '🧬',
+  'ENGLISH': '📝', 'LANGUAGE': '🗣️', 'READING': '📖', 'WRITING': '✍️',
+  'HISTORY': '📜', 'GEOGRAPHY': '🌍', 'ART': '🎨', 'MUSIC': '🎵',
+  'PROGRAM': '💻', 'PROGRAMMING': '💻', 'CODE': '👨‍💻', 'CODING': '👨‍💻',
+  'DATA': '📊', 'INTERNET': '🌐', 'WEBSITE': '🌐', 'APP': '📱',
+  'ROBOT': '🤖', 'MACHINE': '⚙️', 'SOFTWARE': '💾', 'HARDWARE': '🖥️',
+  
+  // === COMMON VERBS ===
+  'UNDERSTAND': '💡', 'REMEMBER': '🧠', 'FORGET': '❓',
+  'THINK': '🤔', 'KNOW': '💡', 'BELIEVE': '🙏',
+  'WANT': '👈', 'NEED': '👐', 'LIKE': '👍', 'LOVE': '🤟',
+  'MAKE': '🔨', 'CREATE': '✨', 'BUILD': '🏗️',
+  'USE': '👆', 'WORK': '💼', 'PLAY': '🎮',
+  'READ': '📖', 'WRITE': '✍️', 'SPEAK': '🗣️', 'LISTEN': '👂',
+  'SEE': '👀', 'LOOK': '👁️', 'WATCH': '👀', 'SHOW': '👉',
+  'ASK': '❓', 'ANSWER': '💬', 'EXPLAIN': '💡', 'DESCRIBE': '📝',
+  'TRY': '💪', 'PRACTICE': '🏃', 'FINISH': '✅', 'START': '▶️',
+  'OPEN': '📂', 'CLOSE': '📁', 'SEND': '📤', 'GET': '📥',
+  'FIND': '🔍', 'SEARCH': '🔎', 'SOLVE': '✅', 'CALCULATE': '🔢',
+  
+  // === COMMON NOUNS ===
+  'TEACHER': '👨‍🏫', 'STUDENT': '👨‍🎓', 'CLASS': '🏫', 'CLASSROOM': '🏫',
+  'SCHOOL': '📚', 'UNIVERSITY': '🎓', 'COLLEGE': '🏛️',
+  'BOOK': '📕', 'NOTEBOOK': '📓', 'PEN': '🖊️', 'PENCIL': '✏️',
+  'PAPER': '📄', 'PAGE': '📃', 'DOCUMENT': '📄',
+  'QUESTION': '❓', 'PROBLEM': '🤔', 'SOLUTION': '💡', 'IDEA': '💡',
+  'EXAMPLE': '📌', 'LESSON': '📝', 'TEST': '📝', 'EXAM': '📋',
+  'HOMEWORK': '📝', 'PROJECT': '📊', 'ASSIGNMENT': '📝',
+  'WORD': '📝', 'SENTENCE': '📃', 'PARAGRAPH': '📄', 'ESSAY': '📝',
+  'NUMBER': '🔢', 'EQUATION': '➗', 'FORMULA': '📐',
+  'PICTURE': '🖼️', 'IMAGE': '🖼️', 'VIDEO': '📹', 'AUDIO': '🔊',
+  'FILE': '📁', 'FOLDER': '📂', 'SCREEN': '🖥️', 'KEYBOARD': '⌨️',
+  'FRIEND': '🤝', 'FAMILY': '👨‍👩‍👧', 'PERSON': '🧑', 'PEOPLE': '👥',
+  'TIME': '⏰', 'DAY': '☀️', 'TODAY': '📅', 'TOMORROW': '📆',
+  'YEAR': '📅', 'WEEK': '📅', 'MONTH': '📅',
+  
+  // === ADJECTIVES ===
+  'GOOD': '👍', 'BAD': '👎', 'GREAT': '⭐', 'BEST': '🏆',
+  'EASY': '😊', 'HARD': '😓', 'DIFFICULT': '😓',
+  'RIGHT': '✅', 'WRONG': '❌', 'CORRECT': '✅', 'INCORRECT': '❌',
+  'NEW': '✨', 'OLD': '📜', 'SAME': '🔄', 'DIFFERENT': '↔️',
+  'BIG': '⬆️', 'SMALL': '⬇️', 'LONG': '↔️', 'SHORT': '↕️',
+  'FAST': '⚡', 'SLOW': '🐢', 'QUICK': '⚡',
+  'HAPPY': '😊', 'SAD': '😢', 'ANGRY': '😠', 'TIRED': '😴',
+  'HUNGRY': '🍽️', 'IMPORTANT': '⭐', 'INTERESTING': '✨',
+  'SIMPLE': '✔️', 'COMPLEX': '🔄', 'CLEAR': '💎', 'CONFUSED': '😕',
+  
+  // === COMMON PHRASES & GREETINGS ===
+  'HELLO': '👋', 'HI': '👋', 'GOODBYE': '👋', 'BYE': '👋',
+  'THANK': '🙏', 'THANKS': '🙏', 'PLEASE': '🙏', 'SORRY': '✊',
+  'YES': '👍', 'NO': '👎', 'MAYBE': '🤷', 'OK': '👌', 'OKAY': '👌',
+  'HELP': '👍', 'DONT': '🚫', 'NOT': '🚫', 'CANT': '🚫', 'CANNOT': '🚫',
+  'WELCOME': '🤗', 'CONGRATULATIONS': '🎉', 'WELL': '👍', 'DONE': '✅',
+  
+  // === QUESTION WORDS ===
+  'WHAT': '❓', 'WHERE': '📍', 'WHEN': '⏰', 'WHY': '🤔',
+  'HOW': '💭', 'WHO': '👤', 'WHICH': '👈',
+  
+  // === PRONOUNS & ARTICLES (avoid duplicating 'A' and 'I' which are alphabet letters) ===
+  'YOU': '👉', 'WE': '👥', 'THEY': '👥',
+  'HE': '👤', 'SHE': '👤', 'IT': '👇',
+  'MY': '✋', 'YOUR': '👉', 'OUR': '👥', 'THEIR': '👥',
+  'THE': '⏸️', 'AN': '👊',
+  'THIS': '👇', 'THAT': '👉', 'THESE': '👇', 'THOSE': '👉',
+  'IS': '⏸️', 'ARE': '⏸️', 'WAS': '⏸️', 'WERE': '⏸️',
+  'HAVE': '✋', 'HAS': '✋', 'HAD': '✋',
+  'CAN': '💪', 'WILL': '➡️', 'WOULD': '🤔',
+  'AND': '➕', 'OR': '↔️', 'BUT': '✋', 'SO': '➡️', 'BECAUSE': '💭',
+  'WITH': '🤝', 'FOR': '➡️', 'TO': '➡️', 'FROM': '⬅️',
+  'IN': '📥', 'ON': '⬆️', 'AT': '📍', 'OF': '↔️',
+  'ABOUT': '💭', 'VERY': '⭐', 'MORE': '➕', 'LESS': '➖',
+  
   // Punctuation
   '.': '⏸️', ',': '⏸️', '?': '❓', '!': '❗', ' ': '⏸️'
 };
