@@ -402,7 +402,8 @@ ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation 
                   // This is a lightweight ping that OpenAI accepts
                   wsRef.current.send(JSON.stringify({
                     type: "input_audio_buffer.append",
-                    audio: "" // Empty audio - just keeps connection alive
+                     // Send a tiny chunk of silence (1 sample) to avoid some servers closing on empty payloads.
+                     audio: "AA=="
                   }));
                   console.log("Heartbeat sent to keep connection alive");
                 }

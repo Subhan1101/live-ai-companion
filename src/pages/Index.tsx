@@ -50,6 +50,8 @@ const Index = () => {
   const [isBSLLoading, setIsBSLLoading] = useState(false);
   const [bslResponseText, setBslResponseText] = useState('');
   const screenCaptureIntervalRef = useRef<number | null>(null);
+  const bslTogglePendingRef = useRef(false);
+  const lastBSLAssistantMessageIdRef = useRef<string | null>(null);
 
   // Only close when the dialog requests to close.
   // (Radix may call onOpenChange(true) in controlled mode in some cases;
@@ -252,38 +254,43 @@ const Index = () => {
       return;
     }
 
+    // Avoid side-effects inside setState updater (prevents React warnings).
+    bslTogglePendingRef.current = true;
     setIsBSLLoading(true);
-    setIsBSLEnabled(prev => {
-      const next = !prev;
-      
-      // Notify the AI about BSL mode change
-      sendBSLModeChange(next);
-      
-      if (next) {
-        toast({
-          title: "BSL Mode Enabled",
-          description: "The AI teacher will now respond in a BSL-friendly way with short, clear sentences.",
-        });
-      } else {
-        toast({
-          title: "BSL Mode Disabled",
-          description: "Switched back to voice-only mode.",
-        });
-      }
-      setIsBSLLoading(false);
-      return next;
-    });
-  }, [isConnected, sendBSLModeChange]);
+    setIsBSLEnabled((prev) => !prev);
+  }, [isConnected]);
 
-  // Update BSL response text when new assistant message arrives
+  // Perform BSL toggle side-effects after state update
   useEffect(() => {
-    if (isBSLEnabled && messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage.role === 'assistant') {
-        setBslResponseText(lastMessage.content);
-      }
-    }
-  }, [messages, isBSLEnabled]);
+    if (!bslTogglePendingRef.current) return;
+    bslTogglePendingRef.current = false;
+
+    sendBSLModeChange(isBSLEnabled);
+
+    toast({
+      title: isBSLEnabled ? "BSL Mode Enabled" : "BSL Mode Disabled",
+      description: isBSLEnabled
+        ? "The teacher will respond with short, clear sentences for better sign output."
+        : "Switched back to voice-only mode.",
+    });
+
+    setIsBSLLoading(false);
+  }, [isBSLEnabled, sendBSLModeChange]);
+
+  // Update BSL response text only when the assistant finishes a response.
+  // This prevents the BSL panel from constantly resetting during token streaming.
+  useEffect(() => {
+    if (!isBSLEnabled) return;
+    if (isProcessing) return;
+
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    if (!lastAssistant) return;
+
+    if (lastBSLAssistantMessageIdRef.current === lastAssistant.id) return;
+    lastBSLAssistantMessageIdRef.current = lastAssistant.id;
+
+    setBslResponseText(lastAssistant.content);
+  }, [messages, isBSLEnabled, isProcessing]);
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">

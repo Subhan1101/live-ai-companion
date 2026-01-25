@@ -36,6 +36,15 @@ export function sanitizeLatex(latex: string): string {
       changed = true;
     }
   }
+
+  // Handle common malformed nesting like "$$$x^2$$$" where our matcher can
+  // end up capturing an unbalanced leading/trailing single '$'.
+  // Example capture: "$x^2" -> "x^2"
+  if (result.startsWith('$') && !result.endsWith('$')) {
+    result = result.slice(1).trim();
+  } else if (!result.startsWith('$') && result.endsWith('$')) {
+    result = result.slice(0, -1).trim();
+  }
   
   return result;
 }
