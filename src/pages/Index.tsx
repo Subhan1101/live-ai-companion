@@ -5,6 +5,7 @@ import TranscriptPanel from "@/components/TranscriptPanel";
 import ControlBar from "@/components/ControlBar";
 import FileUpload from "@/components/FileUpload";
 import WhiteboardModal from "@/components/WhiteboardModal";
+import BSLPanel from "@/components/BSLPanel";
 
 import { useRealtimeChat } from "@/hooks/useRealtimeChat";
 import { useScreenShare } from "@/hooks/useScreenShare";
@@ -44,6 +45,9 @@ const Index = () => {
   const [isMicOn, setIsMicOn] = useState(true);
   const [recordingTime, setRecordingTime] = useState(0);
   const [showFileUpload, setShowFileUpload] = useState(false);
+  const [isBSLEnabled, setIsBSLEnabled] = useState(false);
+  const [isBSLLoading, setIsBSLLoading] = useState(false);
+  const [bslResponseText, setBslResponseText] = useState('');
   const screenCaptureIntervalRef = useRef<number | null>(null);
 
   // Only close when the dialog requests to close.
@@ -237,13 +241,45 @@ const Index = () => {
     }
   };
 
+  const handleToggleBSL = useCallback(() => {
+    setIsBSLLoading(true);
+    setIsBSLEnabled(prev => {
+      const next = !prev;
+      if (next) {
+        toast({
+          title: "BSL Mode Enabled",
+          description: "British Sign Language input/output is now active.",
+        });
+      } else {
+        toast({
+          title: "BSL Mode Disabled",
+          description: "Switched back to voice-only mode.",
+        });
+      }
+      setIsBSLLoading(false);
+      return next;
+    });
+  }, []);
+
+  // Update BSL response text when new assistant message arrives
+  useEffect(() => {
+    if (isBSLEnabled && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'assistant') {
+        setBslResponseText(lastMessage.content);
+      }
+    }
+  }, [messages, isBSLEnabled]);
+
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Main content area */}
       <div className="flex-1 p-4 lg:p-6 overflow-hidden">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 h-full max-w-[1800px] mx-auto overflow-hidden">
+        <div className={`grid grid-cols-1 gap-4 lg:gap-6 h-full max-w-[1800px] mx-auto overflow-hidden ${
+          isBSLEnabled ? "lg:grid-cols-12" : "lg:grid-cols-12"
+        }`}>
           {/* Avatar Panel - Left */}
-          <div className="lg:col-span-4 h-full min-h-0 overflow-hidden">
+          <div className={`h-full min-h-0 overflow-hidden ${isBSLEnabled ? "lg:col-span-3" : "lg:col-span-4"}`}>
             <AvatarPanel
               status={status}
               isRecording={isRecording}
@@ -256,7 +292,7 @@ const Index = () => {
           </div>
 
           {/* Video Panel - Center */}
-          <div className="lg:col-span-4 h-full min-h-0 overflow-hidden">
+          <div className={`h-full min-h-0 overflow-hidden ${isBSLEnabled ? "lg:col-span-3" : "lg:col-span-4"}`}>
             <VideoPanel
               userName="Jack Jackson"
               isSpeaking={isRecording}
@@ -265,8 +301,8 @@ const Index = () => {
             />
           </div>
 
-          {/* Transcript Panel - Right */}
-          <div className="lg:col-span-4 h-full min-h-0 overflow-hidden">
+          {/* Transcript Panel */}
+          <div className={`h-full min-h-0 overflow-hidden ${isBSLEnabled ? "lg:col-span-3" : "lg:col-span-4"}`}>
             <TranscriptPanel
               messages={messages}
               partialTranscript={partialTranscript}
@@ -275,6 +311,17 @@ const Index = () => {
               onShowWhiteboard={openWhiteboard}
             />
           </div>
+
+          {/* BSL Panel - Right (only when enabled) */}
+          {isBSLEnabled && (
+            <div className="lg:col-span-3 h-full min-h-0 overflow-hidden">
+              <BSLPanel
+                text={bslResponseText}
+                isActive={isBSLEnabled}
+                onSignComplete={() => console.log("BSL sign sequence complete")}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -311,12 +358,15 @@ const Index = () => {
         isRecording={isRecording}
         isCallActive={isConnected}
         isScreenSharing={isSharing}
+        isBSLEnabled={isBSLEnabled}
+        isBSLLoading={isBSLLoading}
         recordingTime={recordingTime}
         onToggleCamera={handleToggleCamera}
         onToggleMic={handleToggleMic}
         onShare={handleShare}
         onCaptureScreen={handleCaptureScreen}
         onToggleCall={handleToggleCall}
+        onToggleBSL={handleToggleBSL}
       />
 
       {/* Screen sharing indicator */}

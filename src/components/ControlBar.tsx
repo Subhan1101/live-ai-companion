@@ -1,4 +1,4 @@
-import { Video, Mic, MonitorUp, Phone, PhoneOff, Circle, Camera, MonitorOff } from "lucide-react";
+import { Video, Mic, MonitorUp, Phone, PhoneOff, Circle, Camera, MonitorOff, Hand } from "lucide-react";
 
 interface ControlBarProps {
   isCameraOn: boolean;
@@ -6,12 +6,15 @@ interface ControlBarProps {
   isRecording: boolean;
   isCallActive: boolean;
   isScreenSharing: boolean;
+  isBSLEnabled: boolean;
+  isBSLLoading?: boolean;
   recordingTime: number;
   onToggleCamera: () => void;
   onToggleMic: () => void;
   onShare: () => void;
   onCaptureScreen: () => void;
   onToggleCall: () => void;
+  onToggleBSL: () => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -27,12 +30,15 @@ export const ControlBar = ({
   isRecording,
   isCallActive,
   isScreenSharing,
+  isBSLEnabled,
+  isBSLLoading = false,
   recordingTime,
   onToggleCamera,
   onToggleMic,
   onShare,
   onCaptureScreen,
   onToggleCall,
+  onToggleBSL,
 }: ControlBarProps) => {
   return (
     <div className="flex items-center justify-between px-6 py-4">
@@ -89,6 +95,19 @@ export const ControlBar = ({
             <span className="text-xs text-muted-foreground mt-1">Capture</span>
           </div>
         )}
+
+        {/* BSL toggle button */}
+        <div className="flex flex-col items-center">
+          <button 
+            onClick={onToggleBSL} 
+            className={`control-button ${isBSLEnabled ? "control-button-active" : ""}`}
+            title="Enable British Sign Language mode"
+            disabled={isBSLLoading}
+          >
+            <Hand className={`w-5 h-5 ${isBSLLoading ? "animate-pulse" : ""}`} />
+          </button>
+          <span className="text-xs text-muted-foreground mt-1">BSL</span>
+        </div>
 
         {/* Call toggle button */}
         <div className="flex flex-col items-center ml-2">
