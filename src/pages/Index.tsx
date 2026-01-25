@@ -52,6 +52,7 @@ const Index = () => {
   const screenCaptureIntervalRef = useRef<number | null>(null);
   const bslTogglePendingRef = useRef(false);
   const lastBSLAssistantMessageIdRef = useRef<string | null>(null);
+  const lastBSLContentLengthRef = useRef<number>(0);
 
   // Only close when the dialog requests to close.
   // (Radix may call onOpenChange(true) in controlled mode in some cases;
@@ -277,23 +278,36 @@ const Index = () => {
     setIsBSLLoading(false);
   }, [isBSLEnabled, sendBSLModeChange]);
 
-  // Update BSL response text when a NEW assistant message appears (by ID).
-  // We track the message ID to avoid resetting the signing animation on every streaming token.
-  // Unlike before, we do NOT wait for isProcessing to be false — we want to start signing
-  // as soon as a new message ID is detected (even if still streaming).
+  // Update BSL response text continuously during streaming.
+  // - When a NEW message ID appears, reset and start signing from beginning.
+  // - When the same message grows (streaming), update text so BSLPanel can extend signs.
   useEffect(() => {
     if (!isBSLEnabled) return;
 
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant) return;
 
-    // Only update when the message ID changes (new message started)
-    if (lastBSLAssistantMessageIdRef.current === lastAssistant.id) return;
-    lastBSLAssistantMessageIdRef.current = lastAssistant.id;
-
-    // Start with whatever content we have now; the signing will begin immediately
-    setBslResponseText(lastAssistant.content);
+    const isNewMessage = lastBSLAssistantMessageIdRef.current !== lastAssistant.id;
+    
+    if (isNewMessage) {
+      // New message started - reset tracking and start fresh
+      lastBSLAssistantMessageIdRef.current = lastAssistant.id;
+      lastBSLContentLengthRef.current = lastAssistant.content.length;
+      setBslResponseText(lastAssistant.content);
+    } else {
+      // Same message - only update if content has grown (streaming)
+      const currentLength = lastAssistant.content.length;
+      if (currentLength > lastBSLContentLengthRef.current) {
+        lastBSLContentLengthRef.current = currentLength;
+        setBslResponseText(lastAssistant.content);
+      }
+    }
   }, [messages, isBSLEnabled]);
+
+  // Memoized callback to prevent BSLPanel from resetting on every parent render
+  const handleBSLSignComplete = useCallback(() => {
+    console.log("BSL sign sequence complete");
+  }, []);
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
@@ -342,7 +356,7 @@ const Index = () => {
               <BSLPanel
                 text={bslResponseText}
                 isActive={isBSLEnabled}
-                onSignComplete={() => console.log("BSL sign sequence complete")}
+                onSignComplete={handleBSLSignComplete}
               />
             </div>
           )}
