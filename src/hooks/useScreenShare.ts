@@ -12,6 +12,21 @@ export const useScreenShare = (): UseScreenShareReturn => {
   const [isSharing, setIsSharing] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const stopScreenShare = useCallback(() => {
+    const stream = streamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      setScreenStream(null);
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsSharing(false);
+    console.log("Screen sharing stopped");
+  }, []);
 
   const startScreenShare = useCallback(async () => {
     try {
@@ -24,6 +39,7 @@ export const useScreenShare = (): UseScreenShareReturn => {
         audio: false,
       });
 
+      streamRef.current = stream;
       setScreenStream(stream);
       setIsSharing(true);
 
@@ -45,19 +61,7 @@ export const useScreenShare = (): UseScreenShareReturn => {
       console.error("Failed to start screen sharing:", error);
       throw error;
     }
-  }, []);
-
-  const stopScreenShare = useCallback(() => {
-    if (screenStream) {
-      screenStream.getTracks().forEach((track) => track.stop());
-      setScreenStream(null);
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsSharing(false);
-    console.log("Screen sharing stopped");
-  }, [screenStream]);
+  }, [stopScreenShare]);
 
   const captureScreenshot = useCallback(async (): Promise<string | null> => {
     if (!videoRef.current || !isSharing) {
