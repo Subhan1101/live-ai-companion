@@ -52,7 +52,19 @@ const MathBlock = ({ latex, displayMode = true }: { latex: string; displayMode?:
   return <Tag ref={containerRef as any} className={displayMode ? "my-4 text-center" : "inline"} />;
 };
 
-// Render text with inline LaTeX
+// Parse and render markdown bold (**text**) as actual bold
+const renderWithBold = (text: string) => {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      const boldText = part.slice(2, -2);
+      return <strong key={i} className="font-semibold">{boldText}</strong>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+};
+
+// Render text with inline LaTeX and markdown bold
 const TextWithMath = ({ text }: { text: string }) => {
   const segments = parseInlineLatex(text);
 
@@ -62,7 +74,7 @@ const TextWithMath = ({ text }: { text: string }) => {
         segment.isLatex ? (
           <MathBlock key={i} latex={segment.text} displayMode={false} />
         ) : (
-          <span key={i}>{segment.text}</span>
+          <span key={i}>{renderWithBold(segment.text)}</span>
         )
       )}
     </span>
