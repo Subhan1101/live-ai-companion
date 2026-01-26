@@ -5,7 +5,7 @@ import TranscriptPanel from "@/components/TranscriptPanel";
 import ControlBar from "@/components/ControlBar";
 import FileUpload from "@/components/FileUpload";
 import WhiteboardModal from "@/components/WhiteboardModal";
-import BSLPanel from "@/components/BSLPanel";
+import { type BSLSettingsState } from "@/components/BSLSettings";
 
 import { useRealtimeChat } from "@/hooks/useRealtimeChat";
 import { useScreenShare } from "@/hooks/useScreenShare";
@@ -49,6 +49,12 @@ const Index = () => {
   const [isBSLEnabled, setIsBSLEnabled] = useState(false);
   const [isBSLLoading, setIsBSLLoading] = useState(false);
   const [bslResponseText, setBslResponseText] = useState('');
+  const [bslSettings, setBslSettings] = useState<BSLSettingsState>({
+    speed: 1,
+    position: 'bottom-left',
+    isCompact: false,
+    autoPlay: true,
+  });
   const screenCaptureIntervalRef = useRef<number | null>(null);
   const bslTogglePendingRef = useRef(false);
   const lastBSLAssistantMessageIdRef = useRef<string | null>(null);
@@ -315,20 +321,23 @@ const Index = () => {
     });
   }, [isConnected, sendTextContent]);
 
-  // Memoized callback to prevent BSLPanel from resetting on every parent render
-  const handleBSLSignComplete = useCallback(() => {
-    console.log("BSL sign sequence complete");
-  }, []);
+  // Handle BSL close from overlay
+  const handleBSLClose = useCallback(() => {
+    setIsBSLEnabled(false);
+    sendBSLModeChange(false);
+    toast({
+      title: "BSL Mode Disabled",
+      description: "Switched back to voice-only mode.",
+    });
+  }, [sendBSLModeChange]);
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Main content area */}
       <div className="flex-1 p-4 lg:p-6 overflow-hidden">
-        <div className={`grid grid-cols-1 gap-4 lg:gap-6 h-full max-w-[1800px] mx-auto overflow-hidden ${
-          isBSLEnabled ? "lg:grid-cols-12" : "lg:grid-cols-12"
-        }`}>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 h-full max-w-[1800px] mx-auto overflow-hidden">
           {/* Avatar Panel - Left */}
-          <div className={`h-full min-h-0 overflow-hidden ${isBSLEnabled ? "lg:col-span-3" : "lg:col-span-4"}`}>
+          <div className="h-full min-h-0 overflow-hidden lg:col-span-4">
             <AvatarPanel
               status={status}
               isRecording={isRecording}
@@ -337,11 +346,16 @@ const Index = () => {
               audioLevel={audioLevel}
               isConnected={isConnected}
               onSimliReady={handleSimliReady}
+              isBSLEnabled={isBSLEnabled}
+              bslText={bslResponseText}
+              bslSettings={bslSettings}
+              onBSLSettingsChange={setBslSettings}
+              onBSLClose={handleBSLClose}
             />
           </div>
 
           {/* Video Panel - Center */}
-          <div className={`h-full min-h-0 overflow-hidden ${isBSLEnabled ? "lg:col-span-3" : "lg:col-span-4"}`}>
+          <div className="h-full min-h-0 overflow-hidden lg:col-span-4">
             <VideoPanel
               userName="Jack Jackson"
               isSpeaking={isRecording}
@@ -352,7 +366,7 @@ const Index = () => {
           </div>
 
           {/* Transcript Panel */}
-          <div className={`h-full min-h-0 overflow-hidden ${isBSLEnabled ? "lg:col-span-3" : "lg:col-span-4"}`}>
+          <div className="h-full min-h-0 overflow-hidden lg:col-span-4">
             <TranscriptPanel
               messages={messages}
               partialTranscript={partialTranscript}
@@ -361,17 +375,6 @@ const Index = () => {
               onShowWhiteboard={openWhiteboard}
             />
           </div>
-
-          {/* BSL Panel - Right (only when enabled) */}
-          {isBSLEnabled && (
-            <div className="lg:col-span-3 h-full min-h-0 overflow-hidden">
-              <BSLPanel
-                text={bslResponseText}
-                isActive={isBSLEnabled}
-                onSignComplete={handleBSLSignComplete}
-              />
-            </div>
-          )}
         </div>
       </div>
 
