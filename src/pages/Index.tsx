@@ -331,6 +331,16 @@ const Index = () => {
     });
   }, [sendBSLModeChange]);
 
+  // Handle text message from TranscriptPanel
+  const handleSendText = useCallback((text: string) => {
+    if (!isConnected || !text.trim()) return;
+    sendTextContent(text, "Text Message");
+    toast({
+      title: "Message sent",
+      description: `Sent: "${text}"`,
+    });
+  }, [isConnected, sendTextContent]);
+
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Main content area */}
@@ -373,6 +383,7 @@ const Index = () => {
               isProcessing={isProcessing}
               onUploadClick={() => setShowFileUpload(true)}
               onShowWhiteboard={openWhiteboard}
+              onSendText={handleSendText}
             />
           </div>
         </div>
