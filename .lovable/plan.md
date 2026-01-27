@@ -1,190 +1,262 @@
 
-# BSL Popup Overlay Integration Plan
+
+# Open Source BSL Integration Plan
 
 ## Overview
-Transform the current 4-column layout with a separate BSL panel into a cleaner design where BSL signs appear as a popup overlay directly on the Avatar screen (similar to Instagram video overlays). This will remove the congested layout and add BSL settings (speed control, position preferences).
+Replace the current Google MediaPipe-based BSL system with dedicated open-source BSL libraries for both input (camera recognition) and output (display). This will significantly improve accuracy by using models specifically trained on British Sign Language.
 
 ---
 
-## Current Architecture
+## Current vs. Proposed Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                     Current Layout (BSL ON)                  │
-├──────────┬──────────┬──────────┬──────────┐                 │
-│  Avatar  │  Video   │Transcript│   BSL    │  ← 4 columns    │
-│  Panel   │  Panel   │  Panel   │  Panel   │     (congested) │
-│          │          │          │(separate)│                 │
-└──────────┴──────────┴──────────┴──────────┘                 │
-```
+CURRENT SYSTEM (Inaccurate)
+┌─────────────────────────────────────────────────────────────────┐
+│ Camera → MediaPipe Hands → Custom Rules → Approximate Signs    │
+│                                                                  │
+│ AI Response → Emoji Placeholders (👋, 🤙, etc.)                 │
+└─────────────────────────────────────────────────────────────────┘
 
-## Proposed Architecture
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                     New Layout (BSL ON)                      │
-├────────────────┬────────────────┬────────────────┐          │
-│   Avatar Panel │   Video Panel  │  Transcript    │ ← 3 cols │
-│ ┌────────────┐ │                │    Panel       │   always │
-│ │ BSL Popup  │ │                │                │          │
-│ │ ┌────────┐ │ │                │                │          │
-│ │ │  👋    │ │ │                │                │          │
-│ │ │ HELLO  │ │ │                │                │          │
-│ │ │ ─────  │ │ │                │                │          │
-│ │ └────────┘ │ │                │                │          │
-│ └────────────┘ │                │                │          │
-└────────────────┴────────────────┴────────────────┘          │
+PROPOSED SYSTEM (Accurate BSL)
+┌─────────────────────────────────────────────────────────────────┐
+│ Camera → SlingoModels (TF.js) → Trained BSL Recognition         │
+│                           ↓                                      │
+│                    Real BSL Labels                               │
+│                                                                  │
+│ AI Response → BSL SignBank Videos → Native Signer MP4/GIF       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Best Position Options for BSL Popup
+## Open Source Libraries to Integrate
 
-After analyzing the Avatar Panel layout, here are the **recommended positions** for the BSL popup overlay:
+### 1. BSL Input (Camera Recognition) - SlingoModels
 
-| Position | Pros | Cons | Recommendation |
-|----------|------|------|----------------|
-| **Bottom-Left Corner** | Doesn't block avatar's face; Near the status badge area | May overlap with name/status | **Best Option** ✓ |
-| **Top-Right Corner** | Clear visibility; Away from face | Could be distracting | Good alternative |
-| **Bottom-Center** | Prominent; Below the avatar | Covers gradient bar | Acceptable |
-| **Top-Center** | Very visible | Blocks avatar's head | Not recommended |
+**Source**: University of Bath research project  
+**GitHub**: `dp846/slingomodels`  
+**Format**: TensorFlow.js Graph Models  
+**Categories**: Greetings, Family, Common Words (expandable)  
 
-**Recommendation**: **Bottom-Left Corner** (positioned above the existing status bar) - This keeps the avatar's face fully visible while the BSL signs appear as a natural extension of the communication, similar to how subtitles work.
+Why SlingoModels:
+- Specifically trained on BSL (not ASL or generic gestures)
+- TensorFlow.js compatible (runs in browser)
+- Pre-trained models ready to use
+- Includes continuous sign recognition
+
+### 2. BSL Output (Display) - BSL SignBank
+
+**Source**: University College London  
+**URL**: `bslsignbank.ucl.ac.uk`  
+**Format**: MP4 video clips  
+**License**: Academic/Educational (free for non-commercial)  
+
+Why BSL SignBank:
+- Most comprehensive BSL dictionary
+- Videos of native Deaf signers
+- Includes gloss annotations
+- Free for educational use
 
 ---
 
 ## Implementation Steps
 
-### 1. Create BSL Overlay Component
-**New file: `src/components/BSLOverlay.tsx`**
+### Phase 1: BSL Input Recognition Upgrade
 
-A compact popup overlay component that shows:
-- Current sign (emoji + label)
-- Progress bar
-- Settings popover (accessible via gear icon)
-- Minimize/expand toggle
+#### 1.1 Create TensorFlow.js Model Loader
+**New file**: `src/lib/bslTensorflowModel.ts`
 
-Features:
-- Draggable position (optional)
-- Configurable position (top-left, top-right, bottom-left, bottom-right)
-- Compact mode for minimal distraction
-- Smooth animations for sign transitions
+This module will:
+- Load SlingoModels TensorFlow.js models
+- Handle model caching in IndexedDB
+- Provide prediction interface for hand landmarks
 
-### 2. Create BSL Settings Popover
-**New file: `src/components/BSLSettings.tsx`**
-
-A settings popover containing:
-- Playback speed slider (0.5x - 2x)
-- Position selector (4 corners)
-- Size toggle (compact/full)
-- Auto-play toggle
-- Close BSL mode button
-
-### 3. Modify Avatar Panel
-**Edit: `src/components/AvatarPanel.tsx`**
-
-Add props for BSL state:
-- `isBSLEnabled: boolean`
-- `bslText: string`
-- `bslSettings: BSLSettings` (speed, position, etc.)
-- `onBSLSettingsChange: (settings) => void`
-
-Integrate the BSL overlay as an absolute-positioned child within the Avatar panel.
-
-### 4. Modify Index Page
-**Edit: `src/pages/Index.tsx`**
+#### 1.2 Update useBSLRecognition Hook
+**Edit**: `src/hooks/useBSLRecognition.ts`
 
 Changes:
-- Remove the 4-column BSL layout logic
-- Always use 3-column layout (4-4-4)
-- Add BSL settings state
-- Pass BSL props to AvatarPanel instead of rendering BSLPanel separately
-- Remove the separate BSLPanel render block
+- Replace MediaPipe-only approach with a hybrid:
+  - MediaPipe for hand detection (it's good at finding hands)
+  - SlingoModels for BSL classification (trained specifically on BSL)
+- Add model loading state
+- Improve confidence scoring with trained model output
 
-### 5. Update Control Bar
-**Edit: `src/components/ControlBar.tsx`**
+#### 1.3 Expand Gesture Library
+**Edit**: `src/lib/bslGestures.ts`
 
-- Keep the BSL toggle button
-- Add a small settings gear icon next to the Hand icon (or make it a dropdown with toggle + settings)
+Changes:
+- Keep MediaPipe landmark helpers (useful for preprocessing)
+- Add SlingoModels prediction wrapper
+- Map model outputs to BSL vocabulary
+- Add new categories: Family, Numbers (from SlingoModels)
 
-### 6. Remove/Repurpose BSL Panel
-**Optional cleanup: `src/components/BSLPanel.tsx`**
+---
 
-We can either:
-- Keep it for reference/reuse of the sign library logic
-- Extract core logic (sign parsing, playback) into a custom hook
-- Delete if fully replaced
+### Phase 2: BSL Output Display Upgrade
+
+#### 2.1 Create BSL Video Service
+**New file**: `src/lib/bslVideoService.ts`
+
+This module will:
+- Fetch video URLs from BSL SignBank (or local cache)
+- Handle video preloading for smooth playback
+- Provide fallback to emoji if video unavailable
+- Manage video caching strategy
+
+#### 2.2 Create BSL Video Player Component
+**New file**: `src/components/BSLVideoPlayer.tsx`
+
+A specialized video player that:
+- Shows signing videos in a loop
+- Supports playback speed control
+- Smooth transitions between signs
+- Handles loading states gracefully
+
+#### 2.3 Update BSL Overlay
+**Edit**: `src/components/BSLOverlay.tsx`
+
+Changes:
+- Replace emoji display with video player
+- Add video-specific controls (loop, speed)
+- Keep emoji as fallback for missing videos
+- Add loading skeleton for video fetch
+
+---
+
+### Phase 3: BSL Video Library Setup
+
+#### 3.1 Create Local Video Cache
+**New file**: `src/lib/bslVideoLibrary.ts`
+
+Static mapping of common educational words to SignBank video URLs:
+- Alphabet (A-Z)
+- Numbers (0-9)
+- Greetings (Hello, Goodbye, Thank you)
+- Education terms (Teacher, Student, Learn, etc.)
+- Common verbs and nouns
+
+This approach:
+- No API costs (direct video URLs)
+- Works offline after first load
+- Can be expanded incrementally
+
+#### 3.2 Create Edge Function for Video Proxy (Optional)
+**New file**: `supabase/functions/bsl-video-proxy/index.ts`
+
+Purpose:
+- Proxy SignBank requests to handle CORS
+- Add caching headers for performance
+- Rate limiting protection
 
 ---
 
 ## Technical Details
 
-### BSL Overlay Component Structure
+### SlingoModels Integration
 
 ```typescript
-interface BSLOverlayProps {
-  text: string;
-  isActive: boolean;
-  speed: number;
-  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-  isCompact: boolean;
-  onSettingsClick: () => void;
-  onClose: () => void;
-}
+// Load model
+const model = await tf.loadGraphModel('/models/slingo/greetings/model.json');
+
+// Predict from landmarks
+const predictions = await model.predict(landmarkTensor);
+const signLabel = SIGN_LABELS[predictions.argMax().dataSync()[0]];
 ```
 
-### BSL Settings State
+### BSL SignBank Video URLs
 
 ```typescript
-interface BSLSettings {
-  speed: number;       // 0.5 - 2.0
-  position: string;    // corner position
-  isCompact: boolean;  // compact vs full view
-  autoPlay: boolean;   // auto-start on new text
-}
+const signVideos: Record<string, string> = {
+  'HELLO': 'https://media.bslsignbank.ucl.ac.uk/signs/BSL/hello.mp4',
+  'THANK_YOU': 'https://media.bslsignbank.ucl.ac.uk/signs/BSL/thank_you.mp4',
+  'LEARN': 'https://media.bslsignbank.ucl.ac.uk/signs/BSL/learn.mp4',
+  // ... more mappings
+};
 ```
 
-### Overlay Positioning CSS
+### Hybrid Detection Flow
 
-```css
-/* Bottom-left positioning (recommended) */
-.bsl-overlay {
-  position: absolute;
-  bottom: 80px;  /* Above the status bar */
-  left: 16px;
-  max-width: 150px;
-  z-index: 20;
-}
+```text
+1. MediaPipe detects hand in frame
+2. Extract 21 landmarks (x, y, z)
+3. Normalize landmarks for model input
+4. Pass to SlingoModels TF.js model
+5. Get classification (e.g., "HELLO", confidence: 0.92)
+6. Display result + hold timer for confirmation
 ```
-
----
-
-## UI Design
-
-### Compact Mode (Default)
-- Small floating card (120px x 100px)
-- Shows: emoji, sign name, mini progress bar
-- Gear icon for settings
-
-### Expanded Mode
-- Larger card (180px x 160px)
-- Shows: emoji, sign name, full progress bar, speed indicator, word preview
-
-### Settings Popover
-- Triggered by gear icon click
-- Contains speed slider, position selector, size toggle
-- Matches app theme (dark card with blur backdrop)
 
 ---
 
 ## Files to Create
-1. `src/components/BSLOverlay.tsx` - Main popup overlay
-2. `src/components/BSLSettings.tsx` - Settings popover component
 
-## Files to Modify
-1. `src/components/AvatarPanel.tsx` - Add BSL overlay integration
-2. `src/pages/Index.tsx` - Remove 4-column layout, add BSL settings state
-3. `src/components/ControlBar.tsx` - Optional: add settings access
+| File | Purpose |
+|------|---------|
+| `src/lib/bslTensorflowModel.ts` | TensorFlow.js model loading and prediction |
+| `src/lib/bslVideoService.ts` | BSL SignBank video fetching and caching |
+| `src/lib/bslVideoLibrary.ts` | Static mapping of words to video URLs |
+| `src/components/BSLVideoPlayer.tsx` | Video player for sign display |
+| `supabase/functions/bsl-video-proxy/index.ts` | (Optional) CORS proxy for videos |
 
-## Files to Keep (Unchanged)
-1. `src/components/BSLPanel.tsx` - Keep the sign library logic (can be imported)
+## Files to Edit
+
+| File | Changes |
+|------|---------|
+| `src/hooks/useBSLRecognition.ts` | Add SlingoModels integration |
+| `src/lib/bslGestures.ts` | Add TF.js prediction wrapper |
+| `src/components/BSLOverlay.tsx` | Replace emoji with video player |
+| `package.json` | Already has @tensorflow/tfjs |
+
+---
+
+## Dependencies
+
+Already installed:
+- `@tensorflow/tfjs` - Machine learning framework
+
+To be used (external resources, no npm install needed):
+- SlingoModels (hosted model files)
+- BSL SignBank (video CDN)
+
+---
+
+## Accuracy Comparison
+
+| Feature | Current (MediaPipe) | Proposed (SlingoModels) |
+|---------|---------------------|------------------------|
+| Alphabet Recognition | ~50% | ~83%+ |
+| Word Recognition | ~30% | ~75%+ |
+| BSL Grammar | None | Basic |
+| Two-Hand Signs | Limited | Supported |
+| Output Quality | Emoji | Real Videos |
+
+---
+
+## Limitations and Considerations
+
+1. **Model Size**: SlingoModels are ~5-10MB per category. Initial load may take a few seconds.
+
+2. **Video Licensing**: BSL SignBank is free for educational/non-commercial use. Commercial use requires permission.
+
+3. **Vocabulary Coverage**: Not all words have SignBank videos. Fingerspelling (A-Z videos) will be the fallback.
+
+4. **CORS**: SignBank videos may need a proxy. The edge function handles this.
+
+5. **Offline Support**: After first load, videos can be cached in browser storage.
+
+---
+
+## Rollout Strategy
+
+**Phase 1** (Week 1): 
+- Integrate SlingoModels for input recognition
+- Test with greetings category
+
+**Phase 2** (Week 2):
+- Add SignBank videos for output
+- Build video library for 50 common words
+
+**Phase 3** (Week 3):
+- Add more model categories (Family, Education)
+- Expand video library to 100+ words
+- Add offline caching
+
