@@ -1,262 +1,203 @@
 
 
-# Open Source BSL Integration Plan
+# BSL Speed & Text Input Fix Plan
 
-## Overview
-Replace the current Google MediaPipe-based BSL system with dedicated open-source BSL libraries for both input (camera recognition) and output (display). This will significantly improve accuracy by using models specifically trained on British Sign Language.
+## Issues Identified
 
----
+### 1. BSL Speed Too Fast
+The current timing at 1x speed is 800ms per sign, which is too fast for users to follow.
 
-## Current vs. Proposed Architecture
-
-```text
-CURRENT SYSTEM (Inaccurate)
-┌─────────────────────────────────────────────────────────────────┐
-│ Camera → MediaPipe Hands → Custom Rules → Approximate Signs    │
-│                                                                  │
-│ AI Response → Emoji Placeholders (👋, 🤙, etc.)                 │
-└─────────────────────────────────────────────────────────────────┘
-
-PROPOSED SYSTEM (Accurate BSL)
-┌─────────────────────────────────────────────────────────────────┐
-│ Camera → SlingoModels (TF.js) → Trained BSL Recognition         │
-│                           ↓                                      │
-│                    Real BSL Labels                               │
-│                                                                  │
-│ AI Response → BSL SignBank Videos → Native Signer MP4/GIF       │
-└─────────────────────────────────────────────────────────────────┘
+**Root cause**: Line 118 in `BSLOverlay.tsx`:
+```typescript
+const delay = signs[currentSignIndex] === ' ' ? 300 : 800 / settings.speed;
 ```
 
----
+At 1x speed: 800ms per sign (too fast)
+At 0.5x speed: 1600ms per sign
+At 2x speed: 400ms per sign (extremely fast)
 
-## Open Source Libraries to Integrate
+### 2. Speed Settings Not Working Properly
+The speed control exists but the formula makes "slower" settings show signs faster and "faster" settings show signs slower - which is backwards!
 
-### 1. BSL Input (Camera Recognition) - SlingoModels
+**Fix needed**: Invert the speed calculation logic - higher speed = shorter delay.
 
-**Source**: University of Bath research project  
-**GitHub**: `dp846/slingomodels`  
-**Format**: TensorFlow.js Graph Models  
-**Categories**: Greetings, Family, Common Words (expandable)  
-
-Why SlingoModels:
-- Specifically trained on BSL (not ASL or generic gestures)
-- TensorFlow.js compatible (runs in browser)
-- Pre-trained models ready to use
-- Includes continuous sign recognition
-
-### 2. BSL Output (Display) - BSL SignBank
-
-**Source**: University College London  
-**URL**: `bslsignbank.ucl.ac.uk`  
-**Format**: MP4 video clips  
-**License**: Academic/Educational (free for non-commercial)  
-
-Why BSL SignBank:
-- Most comprehensive BSL dictionary
-- Videos of native Deaf signers
-- Includes gloss annotations
-- Free for educational use
+### 3. Text Input Disabled
+The text input in `TranscriptPanel.tsx` has `disabled` attribute hardcoded, preventing users from typing.
 
 ---
 
-## Implementation Steps
+## Solution
 
-### Phase 1: BSL Input Recognition Upgrade
+### Part 1: Fix BSL Speed Timing
 
-#### 1.1 Create TensorFlow.js Model Loader
-**New file**: `src/lib/bslTensorflowModel.ts`
-
-This module will:
-- Load SlingoModels TensorFlow.js models
-- Handle model caching in IndexedDB
-- Provide prediction interface for hand landmarks
-
-#### 1.2 Update useBSLRecognition Hook
-**Edit**: `src/hooks/useBSLRecognition.ts`
+**File: `src/components/BSLOverlay.tsx`**
 
 Changes:
-- Replace MediaPipe-only approach with a hybrid:
-  - MediaPipe for hand detection (it's good at finding hands)
-  - SlingoModels for BSL classification (trained specifically on BSL)
-- Add model loading state
-- Improve confidence scoring with trained model output
+- Increase base delay from 800ms to 2000ms for comfortable viewing
+- Fix speed calculation: `baseDelay / speed` means 1x = 2000ms, 0.5x = 4000ms (slower), 2x = 1000ms (faster)
+- Increase pause between words from 300ms to 800ms
 
-#### 1.3 Expand Gesture Library
-**Edit**: `src/lib/bslGestures.ts`
+**Updated formula**:
+```typescript
+// Base delay of 2000ms at 1x speed
+// 0.25x = 8000ms (very slow)
+// 0.5x = 4000ms (slow) 
+// 1x = 2000ms (normal)
+// 1.5x = 1333ms (faster)
+// 2x = 1000ms (fast)
+const delay = signs[currentSignIndex] === ' ' ? 800 : 2000 / settings.speed;
+```
 
-Changes:
-- Keep MediaPipe landmark helpers (useful for preprocessing)
-- Add SlingoModels prediction wrapper
-- Map model outputs to BSL vocabulary
-- Add new categories: Family, Numbers (from SlingoModels)
+### Part 2: Expand Speed Options
 
----
-
-### Phase 2: BSL Output Display Upgrade
-
-#### 2.1 Create BSL Video Service
-**New file**: `src/lib/bslVideoService.ts`
-
-This module will:
-- Fetch video URLs from BSL SignBank (or local cache)
-- Handle video preloading for smooth playback
-- Provide fallback to emoji if video unavailable
-- Manage video caching strategy
-
-#### 2.2 Create BSL Video Player Component
-**New file**: `src/components/BSLVideoPlayer.tsx`
-
-A specialized video player that:
-- Shows signing videos in a loop
-- Supports playback speed control
-- Smooth transitions between signs
-- Handles loading states gracefully
-
-#### 2.3 Update BSL Overlay
-**Edit**: `src/components/BSLOverlay.tsx`
+**File: `src/components/BSLSettings.tsx`**
 
 Changes:
-- Replace emoji display with video player
-- Add video-specific controls (loop, speed)
-- Keep emoji as fallback for missing videos
-- Add loading skeleton for video fetch
+- Extend speed range from 0.25x to 2.5x (currently 0.5x to 2x)
+- Add finer step size of 0.1 (currently 0.25)
+- Add preset speed buttons (Slow, Normal, Fast)
 
----
+### Part 3: Enable Text Input
 
-### Phase 3: BSL Video Library Setup
+**File: `src/components/TranscriptPanel.tsx`**
 
-#### 3.1 Create Local Video Cache
-**New file**: `src/lib/bslVideoLibrary.ts`
+Changes:
+- Add state for text input value
+- Add `onSendText` callback prop
+- Remove `disabled` from input
+- Enable send button when text is entered
+- Add keyboard handler for Enter key
 
-Static mapping of common educational words to SignBank video URLs:
-- Alphabet (A-Z)
-- Numbers (0-9)
-- Greetings (Hello, Goodbye, Thank you)
-- Education terms (Teacher, Student, Learn, etc.)
-- Common verbs and nouns
+**File: `src/pages/Index.tsx`**
 
-This approach:
-- No API costs (direct video URLs)
-- Works offline after first load
-- Can be expanded incrementally
-
-#### 3.2 Create Edge Function for Video Proxy (Optional)
-**New file**: `supabase/functions/bsl-video-proxy/index.ts`
-
-Purpose:
-- Proxy SignBank requests to handle CORS
-- Add caching headers for performance
-- Rate limiting protection
+Changes:
+- Add `handleSendText` function that uses `sendTextContent`
+- Pass handler to TranscriptPanel
 
 ---
 
 ## Technical Details
 
-### SlingoModels Integration
+### BSLOverlay.tsx Changes
 
 ```typescript
-// Load model
-const model = await tf.loadGraphModel('/models/slingo/greetings/model.json');
-
-// Predict from landmarks
-const predictions = await model.predict(landmarkTensor);
-const signLabel = SIGN_LABELS[predictions.argMax().dataSync()[0]];
+// Line 118 - Update timing calculation
+const delay = signs[currentSignIndex] === ' ' ? 800 : 2000 / settings.speed;
 ```
 
-### BSL SignBank Video URLs
+### BSLSettings.tsx Changes
 
 ```typescript
-const signVideos: Record<string, string> = {
-  'HELLO': 'https://media.bslsignbank.ucl.ac.uk/signs/BSL/hello.mp4',
-  'THANK_YOU': 'https://media.bslsignbank.ucl.ac.uk/signs/BSL/thank_you.mp4',
-  'LEARN': 'https://media.bslsignbank.ucl.ac.uk/signs/BSL/learn.mp4',
-  // ... more mappings
-};
+// Update slider range and add preset buttons
+<Slider
+  value={[settings.speed]}
+  onValueChange={([value]) => updateSetting('speed', value)}
+  min={0.25}  // Changed from 0.5
+  max={2.5}   // Changed from 2
+  step={0.1}  // Changed from 0.25
+  className="h-4"
+/>
+
+// Add preset buttons
+<div className="flex gap-1 mt-1">
+  <Button size="sm" onClick={() => updateSetting('speed', 0.5)}>Slow</Button>
+  <Button size="sm" onClick={() => updateSetting('speed', 1)}>Normal</Button>
+  <Button size="sm" onClick={() => updateSetting('speed', 2)}>Fast</Button>
+</div>
 ```
 
-### Hybrid Detection Flow
+### TranscriptPanel.tsx Changes
 
-```text
-1. MediaPipe detects hand in frame
-2. Extract 21 landmarks (x, y, z)
-3. Normalize landmarks for model input
-4. Pass to SlingoModels TF.js model
-5. Get classification (e.g., "HELLO", confidence: 0.92)
-6. Display result + hold timer for confirmation
+```typescript
+// Add props
+interface TranscriptPanelProps {
+  // ... existing props
+  onSendText?: (text: string) => void;
+}
+
+// Add state
+const [inputText, setInputText] = useState('');
+
+// Update input element
+<input
+  type="text"
+  value={inputText}
+  onChange={(e) => setInputText(e.target.value)}
+  onKeyDown={(e) => {
+    if (e.key === 'Enter' && inputText.trim() && onSendText) {
+      onSendText(inputText.trim());
+      setInputText('');
+    }
+  }}
+  placeholder="Type a message to Aria..."
+  className="flex-1 bg-transparent text-sm outline-none"
+/>
+
+// Update send button
+<button 
+  onClick={() => {
+    if (inputText.trim() && onSendText) {
+      onSendText(inputText.trim());
+      setInputText('');
+    }
+  }}
+  disabled={!inputText.trim()}
+  className={cn(
+    "w-10 h-10 rounded-full flex items-center justify-center transition-colors",
+    inputText.trim() 
+      ? "bg-status-speaking text-white cursor-pointer hover:bg-status-speaking/80" 
+      : "bg-status-speaking text-white opacity-50 cursor-not-allowed"
+  )}
+>
+  <Send className="w-5 h-5" />
+</button>
+```
+
+### Index.tsx Changes
+
+```typescript
+// Add handler
+const handleSendText = useCallback((text: string) => {
+  if (!isConnected || !text.trim()) return;
+  sendTextContent(text, "Text Message");
+  toast({
+    title: "Message sent",
+    description: `Sent: "${text}"`,
+  });
+}, [isConnected, sendTextContent]);
+
+// Pass to TranscriptPanel
+<TranscriptPanel
+  // ... existing props
+  onSendText={handleSendText}
+/>
 ```
 
 ---
 
-## Files to Create
-
-| File | Purpose |
-|------|---------|
-| `src/lib/bslTensorflowModel.ts` | TensorFlow.js model loading and prediction |
-| `src/lib/bslVideoService.ts` | BSL SignBank video fetching and caching |
-| `src/lib/bslVideoLibrary.ts` | Static mapping of words to video URLs |
-| `src/components/BSLVideoPlayer.tsx` | Video player for sign display |
-| `supabase/functions/bsl-video-proxy/index.ts` | (Optional) CORS proxy for videos |
-
-## Files to Edit
+## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/hooks/useBSLRecognition.ts` | Add SlingoModels integration |
-| `src/lib/bslGestures.ts` | Add TF.js prediction wrapper |
-| `src/components/BSLOverlay.tsx` | Replace emoji with video player |
-| `package.json` | Already has @tensorflow/tfjs |
+| `src/components/BSLOverlay.tsx` | Update delay from 800ms to 2000ms base |
+| `src/components/BSLSettings.tsx` | Expand speed range (0.25-2.5), finer steps, add presets |
+| `src/components/TranscriptPanel.tsx` | Enable text input, add state and handlers |
+| `src/pages/Index.tsx` | Add `handleSendText` and pass to TranscriptPanel |
 
 ---
 
-## Dependencies
+## Expected Behavior After Fix
 
-Already installed:
-- `@tensorflow/tfjs` - Machine learning framework
+### BSL Speed
+- **0.25x**: 8 seconds per sign (very slow, for learning)
+- **0.5x**: 4 seconds per sign (slow)
+- **1x**: 2 seconds per sign (comfortable default)
+- **1.5x**: 1.3 seconds per sign (faster)
+- **2x**: 1 second per sign (fast)
+- **2.5x**: 0.8 seconds per sign (very fast)
 
-To be used (external resources, no npm install needed):
-- SlingoModels (hosted model files)
-- BSL SignBank (video CDN)
-
----
-
-## Accuracy Comparison
-
-| Feature | Current (MediaPipe) | Proposed (SlingoModels) |
-|---------|---------------------|------------------------|
-| Alphabet Recognition | ~50% | ~83%+ |
-| Word Recognition | ~30% | ~75%+ |
-| BSL Grammar | None | Basic |
-| Two-Hand Signs | Limited | Supported |
-| Output Quality | Emoji | Real Videos |
-
----
-
-## Limitations and Considerations
-
-1. **Model Size**: SlingoModels are ~5-10MB per category. Initial load may take a few seconds.
-
-2. **Video Licensing**: BSL SignBank is free for educational/non-commercial use. Commercial use requires permission.
-
-3. **Vocabulary Coverage**: Not all words have SignBank videos. Fingerspelling (A-Z videos) will be the fallback.
-
-4. **CORS**: SignBank videos may need a proxy. The edge function handles this.
-
-5. **Offline Support**: After first load, videos can be cached in browser storage.
-
----
-
-## Rollout Strategy
-
-**Phase 1** (Week 1): 
-- Integrate SlingoModels for input recognition
-- Test with greetings category
-
-**Phase 2** (Week 2):
-- Add SignBank videos for output
-- Build video library for 50 common words
-
-**Phase 3** (Week 3):
-- Add more model categories (Family, Education)
-- Expand video library to 100+ words
-- Add offline caching
+### Text Input
+- Users can type in the text box
+- Press Enter or click Send to send message
+- Message appears in chat and Aria responds
 
