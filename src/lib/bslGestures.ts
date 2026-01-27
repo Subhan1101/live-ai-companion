@@ -760,26 +760,83 @@ export const allSigns: BSLSign[] = [
   ...numberSigns
 ];
 
-// Main detection function
+/**
+ * Enhanced detection with confidence boosting
+ * Uses rule-based detection with improved scoring
+ */
 export const detectSign = (landmarks: HandLandmark[]): { sign: string; confidence: number } | null => {
   if (!landmarks || landmarks.length !== 21) {
     return null;
   }
   
   let bestMatch: { sign: string; confidence: number } | null = null;
+  let secondBest: { sign: string; confidence: number } | null = null;
   
   for (const sign of allSigns) {
     const confidence = sign.detector(landmarks);
     
-    if (confidence > 0.6 && (!bestMatch || confidence > bestMatch.confidence)) {
-      bestMatch = { sign: sign.name, confidence };
+    if (confidence > 0.6) {
+      if (!bestMatch || confidence > bestMatch.confidence) {
+        secondBest = bestMatch;
+        bestMatch = { sign: sign.name, confidence };
+      } else if (!secondBest || confidence > secondBest.confidence) {
+        secondBest = { sign: sign.name, confidence };
+      }
+    }
+  }
+  
+  // Apply confidence boosting based on margin over second best
+  if (bestMatch && secondBest) {
+    const margin = bestMatch.confidence - secondBest.confidence;
+    // Boost confidence if clear winner
+    if (margin > 0.15) {
+      bestMatch.confidence = Math.min(0.95, bestMatch.confidence + 0.1);
     }
   }
   
   return bestMatch;
 };
 
+/**
+ * Batch detection - find top N matching signs
+ */
+export const detectSignsTop = (landmarks: HandLandmark[], topN: number = 3): Array<{ sign: string; confidence: number }> => {
+  if (!landmarks || landmarks.length !== 21) {
+    return [];
+  }
+  
+  const results: Array<{ sign: string; confidence: number }> = [];
+  
+  for (const sign of allSigns) {
+    const confidence = sign.detector(landmarks);
+    if (confidence > 0.5) {
+      results.push({ sign: sign.name, confidence });
+    }
+  }
+  
+  return results
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, topN);
+};
+
 // Get sign info by name
 export const getSignInfo = (name: string): BSLSign | undefined => {
   return allSigns.find(sign => sign.name.toLowerCase() === name.toLowerCase());
+};
+
+// Export helper for TensorFlow integration
+export const getLandmarkFeatures = (landmarks: HandLandmark[]): number[] => {
+  if (!landmarks || landmarks.length !== 21) {
+    return [];
+  }
+  
+  const features: number[] = [];
+  const wrist = landmarks[0];
+  
+  // Normalize and extract features for ML model
+  for (const lm of landmarks) {
+    features.push(lm.x - wrist.x, lm.y - wrist.y, lm.z);
+  }
+  
+  return features;
 };
