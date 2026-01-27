@@ -1,116 +1,40 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Hand, Settings, Play, Pause, RotateCcw, X, Loader2 } from 'lucide-react';
+import { Hand, Settings, Play, Pause, RotateCcw, X, Loader2, Video, Image } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import BSLSettings, { type BSLSettingsState } from './BSLSettings';
+import BSLVideoPlayer from './BSLVideoPlayer';
+import { getVideoEntry, getFallbackEmoji, hasVideo } from '@/lib/bslVideoLibrary';
+import { preloadForText } from '@/lib/bslVideoService';
 
-// Sign to animation mapping (using text-based representations for now)
-const signLibrary: Record<string, string> = {
-  // Alphabet
-  'A': '👊', 'B': '🖐️', 'C': '🤲', 'D': '👆', 'E': '✊',
-  'F': '👌', 'G': '🤙', 'H': '✌️', 'I': '🤙', 'J': '🤙',
-  'K': '✌️', 'L': '🤟', 'M': '✊', 'N': '✊', 'O': '👌',
-  'P': '👇', 'Q': '👇', 'R': '✌️', 'S': '✊', 'T': '✊',
-  'U': '✌️', 'V': '✌️', 'W': '🤟', 'X': '👆', 'Y': '🤙',
-  'Z': '👆',
-  // Numbers
-  '0': '👌', '1': '☝️', '2': '✌️', '3': '🤟', '4': '🖐️',
-  '5': '🖐️', '6': '🤙', '7': '🤟', '8': '🤘', '9': '👆',
-  
-  // === EDUCATION & TECHNOLOGY WORDS ===
-  'ARTIFICIAL': '🤖', 'INTELLIGENCE': '🧠', 'AI': '🤖',
-  'COMPUTER': '💻', 'TECHNOLOGY': '⚙️', 'DIGITAL': '📱',
-  'LEARN': '📖', 'LEARNING': '📖', 'STUDY': '📚', 'STUDYING': '📚',
-  'TEACH': '👨‍🏫', 'TEACHING': '👨‍🏫', 'EDUCATION': '🎓',
-  'SCIENCE': '🔬', 'MATH': '🔢', 'MATHS': '🔢', 'MATHEMATICS': '🔢',
-  'PHYSICS': '⚛️', 'CHEMISTRY': '🧪', 'BIOLOGY': '🧬',
-  'ENGLISH': '📝', 'LANGUAGE': '🗣️', 'READING': '📖', 'WRITING': '✍️',
-  'HISTORY': '📜', 'GEOGRAPHY': '🌍', 'ART': '🎨', 'MUSIC': '🎵',
-  'PROGRAM': '💻', 'PROGRAMMING': '💻', 'CODE': '👨‍💻', 'CODING': '👨‍💻',
-  'DATA': '📊', 'INTERNET': '🌐', 'WEBSITE': '🌐', 'APP': '📱',
-  'ROBOT': '🤖', 'MACHINE': '⚙️', 'SOFTWARE': '💾', 'HARDWARE': '🖥️',
-  
-  // === COMMON VERBS ===
-  'UNDERSTAND': '💡', 'REMEMBER': '🧠', 'FORGET': '❓',
-  'THINK': '🤔', 'KNOW': '💡', 'BELIEVE': '🙏',
-  'WANT': '👈', 'NEED': '👐', 'LIKE': '👍', 'LOVE': '🤟',
-  'MAKE': '🔨', 'CREATE': '✨', 'BUILD': '🏗️',
-  'USE': '👆', 'WORK': '💼', 'PLAY': '🎮',
-  'READ': '📖', 'WRITE': '✍️', 'SPEAK': '🗣️', 'LISTEN': '👂',
-  'SEE': '👀', 'LOOK': '👁️', 'WATCH': '👀', 'SHOW': '👉',
-  'ASK': '❓', 'ANSWER': '💬', 'EXPLAIN': '💡', 'DESCRIBE': '📝',
-  'TRY': '💪', 'PRACTICE': '🏃', 'FINISH': '✅', 'START': '▶️',
-  'OPEN': '📂', 'CLOSE': '📁', 'SEND': '📤', 'GET': '📥',
-  'FIND': '🔍', 'SEARCH': '🔎', 'SOLVE': '✅', 'CALCULATE': '🔢',
-  
-  // === COMMON NOUNS ===
-  'TEACHER': '👨‍🏫', 'STUDENT': '👨‍🎓', 'CLASS': '🏫', 'CLASSROOM': '🏫',
-  'SCHOOL': '📚', 'UNIVERSITY': '🎓', 'COLLEGE': '🏛️',
-  'BOOK': '📕', 'NOTEBOOK': '📓', 'PEN': '🖊️', 'PENCIL': '✏️',
-  'PAPER': '📄', 'PAGE': '📃', 'DOCUMENT': '📄',
-  'QUESTION': '❓', 'PROBLEM': '🤔', 'SOLUTION': '💡', 'IDEA': '💡',
-  'EXAMPLE': '📌', 'LESSON': '📝', 'TEST': '📝', 'EXAM': '📋',
-  'HOMEWORK': '📝', 'PROJECT': '📊', 'ASSIGNMENT': '📝',
-  'WORD': '📝', 'SENTENCE': '📃', 'PARAGRAPH': '📄', 'ESSAY': '📝',
-  'NUMBER': '🔢', 'EQUATION': '➗', 'FORMULA': '📐',
-  'PICTURE': '🖼️', 'IMAGE': '🖼️', 'VIDEO': '📹', 'AUDIO': '🔊',
-  'FILE': '📁', 'FOLDER': '📂', 'SCREEN': '🖥️', 'KEYBOARD': '⌨️',
-  'FRIEND': '🤝', 'FAMILY': '👨‍👩‍👧', 'PERSON': '🧑', 'PEOPLE': '👥',
-  'TIME': '⏰', 'DAY': '☀️', 'TODAY': '📅', 'TOMORROW': '📆',
-  'YEAR': '📅', 'WEEK': '📅', 'MONTH': '📅',
-  
-  // === ADJECTIVES ===
-  'GOOD': '👍', 'BAD': '👎', 'GREAT': '⭐', 'BEST': '🏆',
-  'EASY': '😊', 'HARD': '😓', 'DIFFICULT': '😓',
-  'RIGHT': '✅', 'WRONG': '❌', 'CORRECT': '✅', 'INCORRECT': '❌',
-  'NEW': '✨', 'OLD': '📜', 'SAME': '🔄', 'DIFFERENT': '↔️',
-  'BIG': '⬆️', 'SMALL': '⬇️', 'LONG': '↔️', 'SHORT': '↕️',
-  'FAST': '⚡', 'SLOW': '🐢', 'QUICK': '⚡',
-  'HAPPY': '😊', 'SAD': '😢', 'ANGRY': '😠', 'TIRED': '😴',
-  'HUNGRY': '🍽️', 'IMPORTANT': '⭐', 'INTERESTING': '✨',
-  'SIMPLE': '✔️', 'COMPLEX': '🔄', 'CLEAR': '💎', 'CONFUSED': '😕',
-  
-  // === COMMON PHRASES & GREETINGS ===
-  'HELLO': '👋', 'HI': '👋', 'GOODBYE': '👋', 'BYE': '👋',
-  'THANK': '🙏', 'THANKS': '🙏', 'PLEASE': '🙏', 'SORRY': '✊',
-  'YES': '👍', 'NO': '👎', 'MAYBE': '🤷', 'OK': '👌', 'OKAY': '👌',
-  'HELP': '👍', 'DONT': '🚫', 'NOT': '🚫', 'CANT': '🚫', 'CANNOT': '🚫',
-  'WELCOME': '🤗', 'CONGRATULATIONS': '🎉', 'WELL': '👍', 'DONE': '✅',
-  
-  // === QUESTION WORDS ===
-  'WHAT': '❓', 'WHERE': '📍', 'WHEN': '⏰', 'WHY': '🤔',
-  'HOW': '💭', 'WHO': '👤', 'WHICH': '👈',
-  
-  // === PRONOUNS & ARTICLES ===
-  'YOU': '👉', 'WE': '👥', 'THEY': '👥',
-  'HE': '👤', 'SHE': '👤', 'IT': '👇',
-  'MY': '✋', 'YOUR': '👉', 'OUR': '👥', 'THEIR': '👥',
-  'THE': '⏸️', 'AN': '👊',
-  'THIS': '👇', 'THAT': '👉', 'THESE': '👇', 'THOSE': '👉',
-  'IS': '⏸️', 'ARE': '⏸️', 'WAS': '⏸️', 'WERE': '⏸️',
-  'HAVE': '✋', 'HAS': '✋', 'HAD': '✋',
-  'CAN': '💪', 'WILL': '➡️', 'WOULD': '🤔',
-  'AND': '➕', 'OR': '↔️', 'BUT': '✋', 'SO': '➡️', 'BECAUSE': '💭',
-  'WITH': '🤝', 'FOR': '➡️', 'TO': '➡️', 'FROM': '⬅️',
-  'IN': '📥', 'ON': '⬆️', 'AT': '📍', 'OF': '↔️',
-  'ABOUT': '💭', 'VERY': '⭐', 'MORE': '➕', 'LESS': '➖',
-  
-  // Punctuation
-  '.': '⏸️', ',': '⏸️', '?': '❓', '!': '❗', ' ': '⏸️'
+// Sign library with video support - now references bslVideoLibrary
+const getSignDisplay = (sign: string): { emoji: string; hasVideo: boolean } => {
+  const entry = getVideoEntry(sign);
+  if (entry) {
+    return { emoji: entry.fallbackEmoji, hasVideo: entry.videoUrl !== null };
+  }
+  // Fallback for punctuation and spaces
+  const punctuation: Record<string, string> = {
+    '.': '⏸️', ',': '⏸️', '?': '❓', '!': '❗', ' ': '⏸️'
+  };
+  return { emoji: punctuation[sign] || '✋', hasVideo: false };
 };
 
-// Convert text to sign sequence
+// Convert text to sign sequence - prioritize full words over fingerspelling
 const textToSigns = (text: string): string[] => {
   const words = text.toUpperCase().split(/\s+/);
   const signs: string[] = [];
   
   for (const word of words) {
-    if (signLibrary[word]) {
+    // Check if word exists in video library
+    const entry = getVideoEntry(word);
+    if (entry) {
       signs.push(word);
     } else {
+      // Fingerspell letters that exist in library
       for (const letter of word) {
-        if (signLibrary[letter]) {
+        if (/[A-Z0-9]/.test(letter)) {
           signs.push(letter);
         }
       }
@@ -148,10 +72,11 @@ export const BSLOverlay = ({
   const [signs, setSigns] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [useVideoMode, setUseVideoMode] = useState(true); // Toggle between video and emoji
   const intervalRef = useRef<number | null>(null);
   const lastTextRef = useRef<string>('');
 
-  // Parse text into signs when text changes
+  // Parse text into signs when text changes + preload videos
   useEffect(() => {
     if (!text) return;
     
@@ -167,14 +92,25 @@ export const BSLOverlay = ({
       setIsLoading(true);
       setSigns(newSigns);
       setCurrentSignIndex(0);
-      if (settings.autoPlay) {
-        setIsPlaying(true);
+      
+      // Preload videos for smooth playback
+      if (useVideoMode) {
+        preloadForText(text).finally(() => {
+          setIsLoading(false);
+          if (settings.autoPlay) {
+            setIsPlaying(true);
+          }
+        });
+      } else {
+        setIsLoading(false);
+        if (settings.autoPlay) {
+          setIsPlaying(true);
+        }
       }
-      setIsLoading(false);
     }
     
     lastTextRef.current = text;
-  }, [text, isPlaying, settings.autoPlay]);
+  }, [text, isPlaying, settings.autoPlay, useVideoMode]);
 
   // Playback logic
   useEffect(() => {
@@ -210,8 +146,9 @@ export const BSLOverlay = ({
   }, []);
 
   const currentSign = signs[currentSignIndex];
-  const signEmoji = currentSign ? signLibrary[currentSign] || '✋' : null;
+  const signDisplay = currentSign ? getSignDisplay(currentSign) : { emoji: '✋', hasVideo: false };
   const progress = signs.length > 0 ? ((currentSignIndex + 1) / signs.length) * 100 : 0;
+  const currentSignHasVideo = currentSign ? hasVideo(currentSign) : false;
 
   if (!isActive) {
     return null;
@@ -242,8 +179,21 @@ export const BSLOverlay = ({
           <div className="flex items-center gap-1">
             <Hand className="w-3 h-3 text-primary" />
             <span className="text-[10px] font-medium text-muted-foreground">BSL</span>
+            {currentSignHasVideo && useVideoMode && (
+              <Video className="w-2.5 h-2.5 text-green-500" />
+            )}
           </div>
           <div className="flex items-center gap-0.5">
+            {/* Toggle video/emoji mode */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("h-5 w-5", useVideoMode ? "text-green-500" : "text-muted-foreground")}
+              onClick={() => setUseVideoMode(!useVideoMode)}
+              title={useVideoMode ? "Using video mode" : "Using emoji mode"}
+            >
+              {useVideoMode ? <Video className="w-2.5 h-2.5" /> : <Image className="w-2.5 h-2.5" />}
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -291,18 +241,32 @@ export const BSLOverlay = ({
               </div>
             ) : (
               <>
-                {/* Sign display */}
+                {/* Sign display - Video or Emoji */}
                 <div className="relative mb-2">
-                  <div className={cn(
-                    'rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/30',
-                    containerSize
-                  )}>
-                    {currentSign === ' ' ? (
+                  {currentSign === ' ' ? (
+                    <div className={cn(
+                      'rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/30',
+                      containerSize
+                    )}>
                       <span className="text-lg text-muted-foreground">...</span>
-                    ) : (
-                      <span className={cn(signSize, 'animate-pulse')}>{signEmoji}</span>
-                    )}
-                  </div>
+                    </div>
+                  ) : useVideoMode && currentSignHasVideo ? (
+                    <BSLVideoPlayer
+                      sign={currentSign}
+                      playbackSpeed={settings.speed}
+                      isCompact={settings.isCompact}
+                      autoPlay={true}
+                      loop={true}
+                      className={containerSize}
+                    />
+                  ) : (
+                    <div className={cn(
+                      'rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/30',
+                      containerSize
+                    )}>
+                      <span className={cn(signSize, 'animate-pulse')}>{signDisplay.emoji}</span>
+                    </div>
+                  )}
                   
                   {/* Sign label */}
                   <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-card border border-border rounded-full shadow-sm">
