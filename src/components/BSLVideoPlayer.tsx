@@ -146,6 +146,8 @@ export const BSLVideoPlayer = ({
           ref={videoRef}
           src={videoUrl}
           className="w-full h-full object-cover"
+          preload="auto"
+          crossOrigin="anonymous"
           autoPlay={autoPlay}
           loop={loop}
           muted
