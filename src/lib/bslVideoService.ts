@@ -33,6 +33,19 @@ const urlCache: Map<string, string> = new Map();
 // Pending load promises to prevent duplicate requests
 const pendingLoads: Map<string, Promise<VideoLoadResult>> = new Map();
 
+// The backend proxy may not be able to resolve external DNS in some runtimes.
+// If we detect that, we bypass the proxy entirely and use direct streaming URLs
+// in the <video> tag (which avoids CORS-fetching blobs from the browser).
+// Default to streaming directly; enable proxy only if it's proven to work.
+// This avoids floods of 500s when the backend runtime can't resolve SignBank DNS.
+let proxyState: 'unknown' | 'available' | 'unavailable' = 'unavailable';
+
+const markProxyUnavailable = (reason: unknown) => {
+  proxyState = 'unavailable';
+  // Keep this a warn (not error) to avoid blank-screen noise.
+  console.warn('BSL video proxy marked unavailable; using direct streaming URLs.', reason);
+};
+
 /**
  * Get the proxy URL for a video (handles CORS)
  */
@@ -45,20 +58,42 @@ const getProxyUrl = (originalUrl: string): string => {
 /**
  * Preload a video and return a blob URL
  */
-const loadVideoBlob = async (url: string, useProxy: boolean = true): Promise<Blob> => {
-  const fetchUrl = useProxy ? getProxyUrl(url) : url;
-  
-  const response = await fetch(fetchUrl, {
-    method: 'GET',
-    headers: {
-      'Accept': 'video/mp4,video/*',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load video: ${response.status} ${response.statusText}`);
+const loadVideoBlobViaProxy = async (url: string): Promise<Blob> => {
+  if (proxyState === 'unavailable') {
+    throw new Error('Proxy unavailable');
   }
 
+  const fetchUrl = getProxyUrl(url);
+
+  let response: Response;
+  try {
+    response = await fetch(fetchUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'video/mp4,video/*',
+      },
+    });
+  } catch (err) {
+    // Network-layer failures (DNS, connect errors, etc.)
+    markProxyUnavailable(err);
+    throw err;
+  }
+
+  if (!response.ok) {
+    // The proxy returns JSON for failures; use it to detect DNS issues and disable proxy.
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const bodyText = await response.text().catch(() => '');
+      if (bodyText.toLowerCase().includes('dns error')) {
+        markProxyUnavailable(bodyText);
+      }
+    }
+
+    throw new Error(`Failed to load video via proxy: ${response.status} ${response.statusText}`);
+  }
+
+  // If we got this far, proxy is usable.
+  proxyState = 'available';
   return await response.blob();
 };
 
@@ -102,25 +137,44 @@ export const loadVideo = async (sign: string): Promise<VideoLoadResult> => {
     }
 
     try {
-      // Try loading with proxy first, then direct
-      let blob: Blob;
-      try {
-        blob = await loadVideoBlob(entry.videoUrl, true);
-      } catch (proxyError) {
-        console.warn(`Proxy failed for ${normalizedSign}, trying direct:`, proxyError);
-        blob = await loadVideoBlob(entry.videoUrl, false);
+      // If proxy isn't usable, don't fetch blobs (CORS + noisy failures). Stream directly.
+      if (proxyState === 'unavailable') {
+        const streamUrl = entry.videoUrl;
+        urlCache.set(normalizedSign, streamUrl);
+        return {
+          sign: normalizedSign,
+          url: entry.videoUrl,
+          objectUrl: streamUrl,
+          fallbackEmoji: entry.fallbackEmoji,
+          isVideo: true,
+        };
       }
 
-      const objectUrl = URL.createObjectURL(blob);
-      urlCache.set(normalizedSign, objectUrl);
-
-      return {
-        sign: normalizedSign,
-        url: entry.videoUrl,
-        objectUrl,
-        fallbackEmoji: entry.fallbackEmoji,
-        isVideo: true,
-      };
+      // Try proxy-blob preloading for smoother transitions.
+      try {
+        const blob = await loadVideoBlobViaProxy(entry.videoUrl);
+        const objectUrl = URL.createObjectURL(blob);
+        urlCache.set(normalizedSign, objectUrl);
+        return {
+          sign: normalizedSign,
+          url: entry.videoUrl,
+          objectUrl,
+          fallbackEmoji: entry.fallbackEmoji,
+          isVideo: true,
+        };
+      } catch (proxyError) {
+        // Fall back to direct streaming URL (works without us fetching cross-origin).
+        const streamUrl = entry.videoUrl;
+        urlCache.set(normalizedSign, streamUrl);
+        return {
+          sign: normalizedSign,
+          url: entry.videoUrl,
+          objectUrl: streamUrl,
+          fallbackEmoji: entry.fallbackEmoji,
+          isVideo: true,
+          error: proxyError instanceof Error ? proxyError.message : 'Proxy failed; streaming directly',
+        };
+      }
     } catch (error) {
       console.error(`Failed to load video for ${normalizedSign}:`, error);
       return {
@@ -184,7 +238,9 @@ export const getVideoOrFallback = (sign: string): { url: string | null; isVideo:
 export const clearVideoCache = (): void => {
   // Revoke all object URLs
   for (const url of urlCache.values()) {
-    URL.revokeObjectURL(url);
+    if (url.startsWith('blob:')) {
+      URL.revokeObjectURL(url);
+    }
   }
   urlCache.clear();
 };
