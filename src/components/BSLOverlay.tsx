@@ -115,7 +115,9 @@ export const BSLOverlay = ({
   // Playback logic
   useEffect(() => {
     if (isPlaying && signs.length > 0 && currentSignIndex < signs.length) {
-      const delay = signs[currentSignIndex] === ' ' ? 300 : 800 / settings.speed;
+      // Base delay of 2000ms at 1x speed for comfortable reading
+      // 0.25x = 8000ms, 0.5x = 4000ms, 1x = 2000ms, 2x = 1000ms
+      const delay = signs[currentSignIndex] === ' ' ? 800 : 2000 / settings.speed;
       
       intervalRef.current = window.setTimeout(() => {
         setCurrentSignIndex(prev => {

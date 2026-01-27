@@ -56,15 +56,42 @@ export const BSLSettings = ({ settings, onSettingsChange, onClose }: BSLSettings
 
       {/* Speed control */}
       <div className="space-y-1.5">
-        <Label className="text-[10px] text-muted-foreground">Speed: {settings.speed}x</Label>
+        <Label className="text-[10px] text-muted-foreground">Speed: {settings.speed.toFixed(1)}x</Label>
         <Slider
           value={[settings.speed]}
           onValueChange={([value]) => updateSetting('speed', value)}
-          min={0.5}
-          max={2}
-          step={0.25}
+          min={0.25}
+          max={2.5}
+          step={0.1}
           className="h-4"
         />
+        {/* Speed preset buttons */}
+        <div className="flex gap-1 mt-1">
+          <Button
+            variant={settings.speed === 0.5 ? 'default' : 'outline'}
+            size="sm"
+            className="h-5 px-2 text-[9px] flex-1"
+            onClick={() => updateSetting('speed', 0.5)}
+          >
+            Slow
+          </Button>
+          <Button
+            variant={settings.speed === 1 ? 'default' : 'outline'}
+            size="sm"
+            className="h-5 px-2 text-[9px] flex-1"
+            onClick={() => updateSetting('speed', 1)}
+          >
+            Normal
+          </Button>
+          <Button
+            variant={settings.speed === 2 ? 'default' : 'outline'}
+            size="sm"
+            className="h-5 px-2 text-[9px] flex-1"
+            onClick={() => updateSetting('speed', 2)}
+          >
+            Fast
+          </Button>
+        </div>
       </div>
 
       {/* Position selector */}

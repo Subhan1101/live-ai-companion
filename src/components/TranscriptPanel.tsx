@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Copy, RotateCcw, ThumbsUp, ThumbsDown, Send, Upload, PenLine } from "lucide-react";
 import { hasWhiteboardContent } from "@/lib/whiteboardParser";
+import { cn } from "@/lib/utils";
 
 interface Message {
   id: string;
@@ -16,14 +17,16 @@ interface TranscriptPanelProps {
   isProcessing: boolean;
   onUploadClick?: () => void;
   onShowWhiteboard?: (content: string) => void;
+  onSendText?: (text: string) => void;
 }
 
 const formatTime = (date: Date) => {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
-export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onUploadClick, onShowWhiteboard }: TranscriptPanelProps) => {
+export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onUploadClick, onShowWhiteboard, onSendText }: TranscriptPanelProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [inputText, setInputText] = useState('');
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -152,9 +155,16 @@ export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onU
         <div className="flex items-center gap-2 bg-muted rounded-full px-4 py-2">
           <input
             type="text"
-            placeholder="Voice conversation active..."
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && inputText.trim() && onSendText) {
+                onSendText(inputText.trim());
+                setInputText('');
+              }
+            }}
+            placeholder="Type a message to Aria..."
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            disabled
           />
           <button 
             onClick={onUploadClick}
@@ -163,7 +173,21 @@ export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onU
           >
             <Upload className="w-5 h-5" />
           </button>
-          <button className="w-10 h-10 rounded-full bg-status-speaking text-white flex items-center justify-center opacity-50">
+          <button 
+            onClick={() => {
+              if (inputText.trim() && onSendText) {
+                onSendText(inputText.trim());
+                setInputText('');
+              }
+            }}
+            disabled={!inputText.trim()}
+            className={cn(
+              "w-10 h-10 rounded-full flex items-center justify-center transition-colors",
+              inputText.trim() 
+                ? "bg-status-speaking text-white cursor-pointer hover:bg-status-speaking/80" 
+                : "bg-status-speaking text-white opacity-50 cursor-not-allowed"
+            )}
+          >
             <Send className="w-5 h-5" />
           </button>
         </div>
