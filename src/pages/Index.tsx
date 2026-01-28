@@ -16,6 +16,7 @@ const Index = () => {
     messages,
     partialTranscript,
     isConnected,
+    isReconnecting,
     isRecording,
     isProcessing,
     isSpeaking,
@@ -446,12 +447,20 @@ const Index = () => {
       {/* Connection status */}
       <div className="fixed bottom-24 left-6">
         <div className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-2 ${
-          isConnected 
-            ? "bg-status-speaking/20 text-status-speaking" 
-            : "bg-muted text-muted-foreground"
+          isReconnecting
+            ? "bg-yellow-500/20 text-yellow-600"
+            : isConnected 
+              ? "bg-status-speaking/20 text-status-speaking" 
+              : "bg-muted text-muted-foreground"
         }`}>
-          <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-status-speaking" : "bg-muted-foreground"}`} />
-          {isConnected ? "Connected" : "Connecting..."}
+          <div className={`w-2 h-2 rounded-full ${
+            isReconnecting 
+              ? "bg-yellow-500 animate-pulse" 
+              : isConnected 
+                ? "bg-status-speaking" 
+                : "bg-muted-foreground"
+          }`} />
+          {isReconnecting ? "Reconnecting..." : isConnected ? "Connected" : "Connecting..."}
         </div>
       </div>
     </div>

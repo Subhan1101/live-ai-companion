@@ -1,5 +1,8 @@
 project_id = "jvfvwysvhqpiosvhzhkf"
 
+[edge_runtime]
+policy = "per_worker"
+
 [functions.realtime-chat]
 verify_jwt = false
 
