@@ -521,11 +521,10 @@ ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation 
                 break;
 
               case "session.updated":
-                console.log("Session configured with Whisper-1 STT - starting auto-listen mode");
-                // Automatically start listening after session is configured
-                if (!isListeningRef.current) {
-                  startAutoListening();
-                }
+                console.log("Session configured with Whisper-1 STT - ready for voice input");
+                // NOTE: Microphone is NOT auto-started due to browser security policies
+                // User must click the microphone button to grant permission (requires user gesture)
+                console.log("Ready for voice input - user must click microphone button to enable");
                 
                 // Schedule proactive reconnection to prevent timeout
                 scheduleProactiveReconnect();

@@ -77,6 +77,16 @@ const Index = () => {
     return () => disconnect();
   }, []);
 
+  // Prompt user to click microphone after connection is established
+  useEffect(() => {
+    if (isConnected && !isRecording) {
+      toast({
+        title: "Connected!",
+        description: "Click the microphone button to start talking to Aria.",
+      });
+    }
+  }, [isConnected]);
+
   // Recording timer
   useEffect(() => {
     let interval: number | null = null;
@@ -463,6 +473,20 @@ const Index = () => {
           {isReconnecting ? "Reconnecting..." : isConnected ? "Connected" : "Connecting..."}
         </div>
       </div>
+
+      {/* Microphone prompt - shown when connected but not recording */}
+      {isConnected && !isRecording && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-pulse">
+          <div className="px-4 py-2 bg-primary/90 text-primary-foreground rounded-full text-sm font-medium flex items-center gap-2 shadow-lg">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" x2="12" y1="19" y2="22"/>
+            </svg>
+            Click the microphone to start talking
+          </div>
+        </div>
+      )}
     </div>
   );
 };
