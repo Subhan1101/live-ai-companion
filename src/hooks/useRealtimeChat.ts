@@ -27,6 +27,7 @@ interface UseRealtimeChatReturn {
   messages: Message[];
   partialTranscript: string;
   isConnected: boolean;
+  isReconnecting: boolean;
   isRecording: boolean;
   isProcessing: boolean;
   isSpeaking: boolean;
@@ -48,10 +49,17 @@ interface UseRealtimeChatReturn {
 
 const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
 
+// Auto-reconnect constants
+const SESSION_WARNING_TIME = 120000; // 2 minutes - warn user
+const PROACTIVE_RECONNECT_TIME = 140000; // 2:20 - reconnect before timeout
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY = 1000; // 1 second base delay for exponential backoff
+
 export const useRealtimeChat = (): UseRealtimeChatReturn => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [partialTranscript, setPartialTranscript] = useState("");
   const [isConnected, setIsConnected] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -82,6 +90,13 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
 
   // Whiteboard repair: sometimes the model emits placeholder tokens like "$1" instead of real formulas.
   const pendingWhiteboardRepairRef = useRef(false);
+
+  // Auto-reconnect state
+  const manualDisconnectRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const connectionStartTimeRef = useRef<number | null>(null);
+  const proactiveReconnectTimeoutRef = useRef<number | null>(null);
+  const warningTimeoutRef = useRef<number | null>(null);
 
   const countPlaceholderTokens = useCallback((text: string) => {
     // Match standalone "$<digit>" but avoid currency like $10 or $1.50
@@ -167,107 +182,227 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     []
   );
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnect();
-    };
+  // Clear proactive reconnect timers
+  const clearReconnectTimers = useCallback(() => {
+    if (proactiveReconnectTimeoutRef.current) {
+      clearTimeout(proactiveReconnectTimeoutRef.current);
+      proactiveReconnectTimeoutRef.current = null;
+    }
+    if (warningTimeoutRef.current) {
+      clearTimeout(warningTimeoutRef.current);
+      warningTimeoutRef.current = null;
+    }
   }, []);
 
-  const connect = useCallback(async () => {
+  // Schedule proactive reconnection to prevent timeout
+  const scheduleProactiveReconnect = useCallback(() => {
+    connectionStartTimeRef.current = Date.now();
+    
+    // Clear any existing timers
+    clearReconnectTimers();
+    
+    // Warning at 2 minutes
+    warningTimeoutRef.current = window.setTimeout(() => {
+      console.log("Session warning: will refresh in 20 seconds");
+      toast({
+        title: "Session refreshing soon",
+        description: "Connection will seamlessly refresh in 20 seconds.",
+      });
+    }, SESSION_WARNING_TIME);
+    
+    // Proactive reconnect at 2:20
+    proactiveReconnectTimeoutRef.current = window.setTimeout(() => {
+      console.log("Proactive reconnection triggered");
+      performReconnect();
+    }, PROACTIVE_RECONNECT_TIME);
+    
+    console.log("Proactive reconnect scheduled for", PROACTIVE_RECONNECT_TIME / 1000, "seconds");
+  }, []);
+
+  // Internal reconnect function
+  const performReconnect = useCallback(async () => {
+    if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+      console.log("Max reconnect attempts reached");
+      toast({
+        title: "Connection Lost",
+        description: "Unable to maintain connection. Please click 'Call' to reconnect.",
+        variant: "destructive",
+      });
+      setIsReconnecting(false);
+      setIsConnected(false);
+      return;
+    }
+
+    console.log("Performing reconnect, attempt:", reconnectAttemptsRef.current + 1);
+    setIsReconnecting(true);
+    reconnectAttemptsRef.current++;
+
+    // Stop recording during reconnect
+    const wasListening = isListeningRef.current;
+    if (recorderRef.current) {
+      recorderRef.current.stop();
+      recorderRef.current = null;
+    }
+    isListeningRef.current = false;
+
+    // Clear timers
+    clearReconnectTimers();
+    
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+    
+    if (audioLevelIntervalRef.current) {
+      clearInterval(audioLevelIntervalRef.current);
+      audioLevelIntervalRef.current = null;
+    }
+
+    // Close existing connection gracefully
+    if (wsRef.current) {
+      wsRef.current.onclose = null; // Prevent onclose from triggering another reconnect
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    // Brief delay before reconnecting
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Reconnect
+    try {
+      await connectInternal();
+      setIsReconnecting(false);
+      reconnectAttemptsRef.current = 0;
+      
+      toast({
+        title: "Connected",
+        description: "Session refreshed successfully.",
+      });
+    } catch (error) {
+      console.error("Reconnect failed:", error);
+      
+      // Exponential backoff for retry
+      const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptsRef.current), 8000);
+      console.log("Retrying in", delay, "ms");
+      
+      setTimeout(() => performReconnect(), delay);
+    }
+  }, []);
+
+  // Core connection logic (extracted for reuse)
+  const connectInternal = useCallback(async () => {
     console.log("Connecting to realtime chat...");
 
     try {
       // Initialize audio context for fallback playback
-      audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+      }
       audioQueueRef.current = new AudioQueue(audioContextRef.current);
 
       // Connect WebSocket
       const ws = new WebSocket(WEBSOCKET_URL);
       wsRef.current = ws;
 
-      ws.onopen = () => {
-        console.log("WebSocket connected (backend proxy)");
-        // NOTE: don't mark connected until OpenAI confirms via proxy.openai_connected
-      };
+      return new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("Connection timeout"));
+          ws.close();
+        }, 10000);
 
-      ws.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          // Log all message types for debugging
-          if (data.type !== "response.audio.delta") {
-            console.log("Received:", data.type, data);
-          }
+        ws.onopen = () => {
+          console.log("WebSocket connected (backend proxy)");
+          // NOTE: don't mark connected until OpenAI confirms via proxy.openai_connected
+        };
 
-          switch (data.type) {
-            case "proxy.openai_connected":
-              console.log("Proxy connected to OpenAI Realtime");
-              setIsConnected(true);
-              break;
-
-            case "proxy.error": {
-              console.error("Proxy error:", data);
-
-              const title = "Voice connection failed";
-              const description =
-                typeof data.reason === "string" && data.reason.length > 0
-                  ? data.reason
-                  : typeof data.message === "string" && data.message.length > 0
-                    ? data.message
-                    : "Backend proxy error";
-
-              toast({
-                title,
-                description,
-                variant: "destructive",
-              });
-
-              setIsConnected(false);
-              setIsProcessing(false);
-              setIsSpeaking(false);
-              setStatus("idle");
-              break;
+        ws.onmessage = async (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            // Log all message types for debugging
+            if (data.type !== "response.audio.delta") {
+              console.log("Received:", data.type, data);
             }
 
-            case "proxy.openai_closed": {
-              console.error("OpenAI connection closed (via proxy):", data);
+            switch (data.type) {
+              case "proxy.openai_connected":
+                console.log("Proxy connected to OpenAI Realtime");
+                clearTimeout(timeout);
+                setIsConnected(true);
+                resolve();
+                break;
 
-              const isKeepaliveTimeout = data.code === 1005 || data.code === 1011;
-              
-              const description =
-                isKeepaliveTimeout
-                  ? "The session was idle too long. Please reconnect to continue."
-                  : typeof data.reason === "string" && data.reason.length > 0
-                    ? `Code ${data.code}: ${data.reason}`
-                    : typeof data.code === "number"
-                      ? `Code ${data.code}`
-                      : "Connection closed";
+              case "proxy.error": {
+                console.error("Proxy error:", data);
 
-              toast({
-                title: isKeepaliveTimeout ? "Session timed out" : "Voice connection closed",
-                description,
-                variant: "destructive",
-              });
+                const title = "Voice connection failed";
+                const description =
+                  typeof data.reason === "string" && data.reason.length > 0
+                    ? data.reason
+                    : typeof data.message === "string" && data.message.length > 0
+                      ? data.message
+                      : "Backend proxy error";
 
-              setIsConnected(false);
-              setIsProcessing(false);
-              setIsSpeaking(false);
-              setStatus("idle");
-              break;
-            }
+                toast({
+                  title,
+                  description,
+                  variant: "destructive",
+                });
 
-            case "session.created":
-              console.log("Session created, sending configuration with Whisper-1 STT...");
-              sessionCreatedRef.current = true;
-              // Send session configuration after session is created
-              // Using OpenAI Realtime API with Whisper-1 for STT and selected voice for TTS
-              ws.send(
-                JSON.stringify({
-                  type: "session.update",
-                  session: {
-                    modalities: ["text", "audio"],
-                    instructions: `You are EduGuide, the world's most dedicated and effective AI teacher, inspired by the greatest educators who work tirelessly to inspire lifelong learning. Your sole mission is to teach students of all ages—children, teens, adults, or seniors—exclusively on educational topics like math, science, language arts, history, languages, revision strategies, homework help, exam prep (e.g., GCSE, SAT), and core academic skills. You adapt perfectly to each student based on their language, tone, vocabulary, sentence structure, and any self-described age or context.
+                setIsConnected(false);
+                setIsProcessing(false);
+                setIsSpeaking(false);
+                setStatus("idle");
+                break;
+              }
+
+              case "proxy.openai_closed": {
+                console.error("OpenAI connection closed (via proxy):", data);
+
+                // Don't show error toast if we're doing a proactive reconnect
+                if (!isReconnecting) {
+                  const isKeepaliveTimeout = data.code === 1005 || data.code === 1011;
+                  
+                  const description =
+                    isKeepaliveTimeout
+                      ? "Reconnecting automatically..."
+                      : typeof data.reason === "string" && data.reason.length > 0
+                        ? `Code ${data.code}: ${data.reason}`
+                        : typeof data.code === "number"
+                          ? `Code ${data.code}`
+                          : "Connection closed";
+
+                  if (!manualDisconnectRef.current) {
+                    toast({
+                      title: isKeepaliveTimeout ? "Session refreshing..." : "Voice connection closed",
+                      description,
+                    });
+                  }
+                }
+
+                setIsConnected(false);
+                setIsProcessing(false);
+                setIsSpeaking(false);
+                setStatus("idle");
+                
+                // Auto-reconnect if not a manual disconnect
+                if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+                  performReconnect();
+                }
+                break;
+              }
+
+              case "session.created":
+                console.log("Session created, sending configuration with Whisper-1 STT...");
+                sessionCreatedRef.current = true;
+                // Send session configuration after session is created
+                // Using OpenAI Realtime API with Whisper-1 for STT and selected voice for TTS
+                ws.send(
+                  JSON.stringify({
+                    type: "session.update",
+                    session: {
+                      modalities: ["text", "audio"],
+                      instructions: `You are EduGuide, the world's most dedicated and effective AI teacher, inspired by the greatest educators who work tirelessly to inspire lifelong learning. Your sole mission is to teach students of all ages—children, teens, adults, or seniors—exclusively on educational topics like math, science, language arts, history, languages, revision strategies, homework help, exam prep (e.g., GCSE, SAT), and core academic skills. You adapt perfectly to each student based on their language, tone, vocabulary, sentence structure, and any self-described age or context.
 
 CORE PRINCIPLES:
 
@@ -365,346 +500,372 @@ RESPONSE RULES:
 - If unclear: "Tell me more about the topic or your grade level so I can help perfectly!"
 
 ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation that doesn't involve teaching, explaining, or academic content.`,
-                    voice: "shimmer",
-                    input_audio_format: "pcm16",
-                    output_audio_format: "pcm16",
-                    input_audio_transcription: {
-                      model: "whisper-1",
+                      voice: "shimmer",
+                      input_audio_format: "pcm16",
+                      output_audio_format: "pcm16",
+                      input_audio_transcription: {
+                        model: "whisper-1",
+                      },
+                      turn_detection: {
+                        type: "server_vad",
+                        threshold: 0.5,
+                        prefix_padding_ms: 300,
+                        silence_duration_ms: 800,
+                        create_response: true,
+                      },
+                      temperature: 0.8,
+                      max_response_output_tokens: "inf",
                     },
-                    turn_detection: {
-                      type: "server_vad",
-                      threshold: 0.5,
-                      prefix_padding_ms: 300,
-                      silence_duration_ms: 800,
-                      create_response: true,
-                    },
-                    temperature: 0.8,
-                    max_response_output_tokens: "inf",
-                  },
-                })
-              );
-              break;
-
-            case "session.updated":
-              console.log("Session configured with Whisper-1 STT - starting auto-listen mode");
-              // Automatically start listening after session is configured
-              if (!isListeningRef.current) {
-                startAutoListening();
-              }
-              
-              // Start heartbeat to keep connection alive (every 15 seconds)
-              // More frequent heartbeats help prevent session timeouts around 3 minutes
-              if (heartbeatIntervalRef.current) {
-                clearInterval(heartbeatIntervalRef.current);
-              }
-              heartbeatIntervalRef.current = window.setInterval(() => {
-                if (wsRef.current?.readyState === WebSocket.OPEN) {
-                  // Send a minimal audio buffer to keep connection alive
-                  // This is a lightweight ping that OpenAI accepts
-                  wsRef.current.send(JSON.stringify({
-                    type: "input_audio_buffer.append",
-                    // Send a tiny chunk of silence (1 sample) to avoid some servers closing on empty payloads.
-                    audio: "AA=="
-                  }));
-                  console.log("Heartbeat sent to keep connection alive");
-                }
-              }, 15000); // Every 15 seconds (reduced from 25s)
-              break;
-
-            case "input_audio_buffer.speech_started":
-              console.log("Speech started");
-              setStatus("listening");
-              setPartialTranscript("");
-              // Clear Simli buffer when user starts speaking (interruption)
-              if (simliClearBufferRef.current) {
-                simliClearBufferRef.current();
-              }
-              // Reset resampler state on interruption
-              resamplerRef.current.reset();
-              break;
-
-            case "input_audio_buffer.speech_stopped":
-              console.log("Speech stopped - server VAD detected end of speech");
-              setStatus("processing");
-              setIsProcessing(true);
-              
-              // Create placeholder user message immediately to ensure correct order
-              const pendingId = crypto.randomUUID();
-              // Push to queue (FIFO) - will be popped when transcription completes
-              pendingUserMessageIdsRef.current.push(pendingId);
-              console.log("Added pending message ID to queue:", pendingId, "Queue length:", pendingUserMessageIdsRef.current.length);
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: pendingId,
-                  role: "user",
-                  content: "...", // Placeholder until transcription completes
-                  timestamp: new Date(),
-                },
-              ]);
-              setPartialTranscript("");
-              break;
-
-            case "input_audio_buffer.committed":
-              console.log("Audio buffer committed - waiting for transcription");
-              break;
-
-            case "conversation.item.created": {
-              const item = data.item;
-              console.log("Conversation item created:", item?.type, item?.role);
-
-              // When OpenAI creates the USER message item, associate it with the oldest placeholder
-              if (item?.role === "user" && typeof item?.id === "string") {
-                const pendingMsgId = pendingUserMessageIdsRef.current.shift();
-                console.log(
-                  "Associating user item to placeholder:",
-                  item.id,
-                  "->",
-                  pendingMsgId,
-                  "Remaining placeholders:",
-                  pendingUserMessageIdsRef.current.length
+                  })
                 );
+                break;
 
-                if (pendingMsgId) {
-                  userItemToMessageIdRef.current.set(item.id, pendingMsgId);
+              case "session.updated":
+                console.log("Session configured with Whisper-1 STT - starting auto-listen mode");
+                // Automatically start listening after session is configured
+                if (!isListeningRef.current) {
+                  startAutoListening();
+                }
+                
+                // Schedule proactive reconnection to prevent timeout
+                scheduleProactiveReconnect();
+                
+                // Start heartbeat to keep connection alive (every 15 seconds)
+                // More frequent heartbeats help prevent session timeouts around 3 minutes
+                if (heartbeatIntervalRef.current) {
+                  clearInterval(heartbeatIntervalRef.current);
+                }
+                heartbeatIntervalRef.current = window.setInterval(() => {
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    // Send a minimal audio buffer to keep connection alive
+                    // This is a lightweight ping that OpenAI accepts
+                    wsRef.current.send(JSON.stringify({
+                      type: "input_audio_buffer.append",
+                      // Send a tiny chunk of silence (1 sample) to avoid some servers closing on empty payloads.
+                      audio: "AA=="
+                    }));
+                    console.log("Heartbeat sent to keep connection alive");
+                  }
+                }, 15000); // Every 15 seconds (reduced from 25s)
+                break;
 
-                  // Some Realtime payloads include transcript on the item itself
-                  const maybeTranscript =
-                    item?.content?.find?.((c: any) => typeof c?.transcript === "string")?.transcript ??
-                    item?.content?.find?.((c: any) => typeof c?.text === "string")?.text;
+              case "input_audio_buffer.speech_started":
+                console.log("Speech started");
+                setStatus("listening");
+                setPartialTranscript("");
+                // Clear Simli buffer when user starts speaking (interruption)
+                if (simliClearBufferRef.current) {
+                  simliClearBufferRef.current();
+                }
+                // Reset resampler state on interruption
+                resamplerRef.current.reset();
+                break;
 
-                    if (typeof maybeTranscript === "string" && maybeTranscript.trim().length > 0) {
+              case "input_audio_buffer.speech_stopped":
+                console.log("Speech stopped - server VAD detected end of speech");
+                setStatus("processing");
+                setIsProcessing(true);
+                
+                // Create placeholder user message immediately to ensure correct order
+                const pendingId = crypto.randomUUID();
+                // Push to queue (FIFO) - will be popped when transcription completes
+                pendingUserMessageIdsRef.current.push(pendingId);
+                console.log("Added pending message ID to queue:", pendingId, "Queue length:", pendingUserMessageIdsRef.current.length);
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: pendingId,
+                    role: "user",
+                    content: "...", // Placeholder until transcription completes
+                    timestamp: new Date(),
+                  },
+                ]);
+                setPartialTranscript("");
+                break;
+
+              case "input_audio_buffer.committed":
+                console.log("Audio buffer committed - waiting for transcription");
+                break;
+
+              case "conversation.item.created": {
+                const item = data.item;
+                console.log("Conversation item created:", item?.type, item?.role);
+
+                // When OpenAI creates the USER message item, associate it with the oldest placeholder
+                if (item?.role === "user" && typeof item?.id === "string") {
+                  const pendingMsgId = pendingUserMessageIdsRef.current.shift();
+                  console.log(
+                    "Associating user item to placeholder:",
+                    item.id,
+                    "->",
+                    pendingMsgId,
+                    "Remaining placeholders:",
+                    pendingUserMessageIdsRef.current.length
+                  );
+
+                  if (pendingMsgId) {
+                    userItemToMessageIdRef.current.set(item.id, pendingMsgId);
+
+                    // Some Realtime payloads include transcript on the item itself
+                    const maybeTranscript =
+                      item?.content?.find?.((c: any) => typeof c?.transcript === "string")?.transcript ??
+                      item?.content?.find?.((c: any) => typeof c?.text === "string")?.text;
+
+                      if (typeof maybeTranscript === "string" && maybeTranscript.trim().length > 0) {
+                        setMessages((prev) =>
+                          prev.map((m) => (m.id === pendingMsgId ? { ...m, content: maybeTranscript } : m))
+                        );
+                        userItemToMessageIdRef.current.delete(item.id);
+                      }
+                    }
+                  }
+                  break;
+                }
+
+                case "conversation.item.updated": {
+                  const item = data.item;
+                  // Some Realtime variants deliver the transcript on a later item.updated event
+                  if (item?.role === "user" && typeof item?.id === "string") {
+                    const maybeTranscript =
+                      item?.content?.find?.((c: any) => typeof c?.transcript === "string")?.transcript ??
+                      item?.content?.find?.((c: any) => typeof c?.text === "string")?.text;
+
+                    const msgId = userItemToMessageIdRef.current.get(item.id);
+
+                    if (msgId && typeof maybeTranscript === "string" && maybeTranscript.trim().length > 0) {
+                      console.log("User item updated with transcript; updating message", item.id, "->", msgId);
                       setMessages((prev) =>
-                        prev.map((m) => (m.id === pendingMsgId ? { ...m, content: maybeTranscript } : m))
+                        prev.map((m) => (m.id === msgId ? { ...m, content: maybeTranscript } : m))
                       );
                       userItemToMessageIdRef.current.delete(item.id);
                     }
                   }
+                  break;
+                }
+
+                case "conversation.item.input_audio_transcription.delta":
+                // Live partial transcription while the user is speaking (Whisper-1 STT)
+                console.log("Live STT delta:", data.delta);
+                if (typeof data.delta === "string") {
+                  setPartialTranscript((prev) => prev + data.delta);
                 }
                 break;
-              }
 
-              case "conversation.item.updated": {
-                const item = data.item;
-                // Some Realtime variants deliver the transcript on a later item.updated event
-                if (item?.role === "user" && typeof item?.id === "string") {
-                  const maybeTranscript =
-                    item?.content?.find?.((c: any) => typeof c?.transcript === "string")?.transcript ??
-                    item?.content?.find?.((c: any) => typeof c?.text === "string")?.text;
+              case "conversation.item.input_audio_transcription.completed": {
+                console.log("Whisper-1 STT complete:", data.transcript, "item_id:", data.item_id);
+                if (typeof data.transcript === "string" && data.transcript.trim().length > 0) {
+                  const itemId = typeof data.item_id === "string" ? data.item_id : null;
+                  const mappedMsgId = itemId ? userItemToMessageIdRef.current.get(itemId) : undefined;
 
-                  const msgId = userItemToMessageIdRef.current.get(item.id);
+                  // Fallback to FIFO placeholder if we don't have an item_id mapping
+                  const msgIdToUpdate = mappedMsgId ?? pendingUserMessageIdsRef.current.shift();
 
-                  if (msgId && typeof maybeTranscript === "string" && maybeTranscript.trim().length > 0) {
-                    console.log("User item updated with transcript; updating message", item.id, "->", msgId);
-                    setMessages((prev) =>
-                      prev.map((m) => (m.id === msgId ? { ...m, content: maybeTranscript } : m))
-                    );
-                    userItemToMessageIdRef.current.delete(item.id);
-                  }
-                }
-                break;
-              }
-
-              case "conversation.item.input_audio_transcription.delta":
-              // Live partial transcription while the user is speaking (Whisper-1 STT)
-              console.log("Live STT delta:", data.delta);
-              if (typeof data.delta === "string") {
-                setPartialTranscript((prev) => prev + data.delta);
-              }
-              break;
-
-            case "conversation.item.input_audio_transcription.completed": {
-              console.log("Whisper-1 STT complete:", data.transcript, "item_id:", data.item_id);
-              if (typeof data.transcript === "string" && data.transcript.trim().length > 0) {
-                const itemId = typeof data.item_id === "string" ? data.item_id : null;
-                const mappedMsgId = itemId ? userItemToMessageIdRef.current.get(itemId) : undefined;
-
-                // Fallback to FIFO placeholder if we don't have an item_id mapping
-                const msgIdToUpdate = mappedMsgId ?? pendingUserMessageIdsRef.current.shift();
-
-                console.log(
-                  "Updating user message:",
-                  { itemId, mappedMsgId, msgIdToUpdate },
-                  "Remaining placeholders:",
-                  pendingUserMessageIdsRef.current.length
-                );
-
-                if (msgIdToUpdate) {
-                  setMessages((prev) =>
-                    prev.map((m) => (m.id === msgIdToUpdate ? { ...m, content: data.transcript } : m))
+                  console.log(
+                    "Updating user message:",
+                    { itemId, mappedMsgId, msgIdToUpdate },
+                    "Remaining placeholders:",
+                    pendingUserMessageIdsRef.current.length
                   );
 
-                  if (itemId) userItemToMessageIdRef.current.delete(itemId);
-                } else {
-                  // Last-resort fallback
-                  const userMessage: Message = {
-                    id: crypto.randomUUID(),
-                    role: "user",
-                    content: data.transcript,
-                    timestamp: new Date(),
-                  };
-                  setMessages((prev) => [...prev, userMessage]);
-                }
-
-                setPartialTranscript("");
-              }
-              break;
-            }
-
-            case "conversation.item.input_audio_transcription.failed":
-              console.error("STT transcription failed:", data.error);
-              setPartialTranscript("");
-              break;
-
-            case "response.created":
-              console.log("AI response started - TTS will follow");
-              setIsProcessing(true);
-              setStatus("processing");
-              break;
-
-            case "response.output_item.added":
-              console.log("Response output item added:", data.item?.type);
-              break;
-
-            case "response.audio.delta":
-              // TTS audio from OpenAI Realtime API (shimmer voice)
-              setIsSpeaking(true);
-              setStatus("speaking");
-              setIsProcessing(false);
-              
-              // Convert base64 to Uint8Array (24kHz PCM16)
-              if (data.delta) {
-                const binaryString = atob(data.delta);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                  bytes[i] = binaryString.charCodeAt(i);
-                }
-                
-                // Send to Simli for lip-sync (primary) - resample 24kHz -> 16kHz
-                if (simliSendAudioRef.current) {
-                  const resampled = resamplerRef.current.process(bytes);
-                  simliSendAudioRef.current(resampled);
-                }
-                
-                // Use fallback audio queue if Simli is not available (keep at 24kHz)
-                if (!simliSendAudioRef.current && audioQueueRef.current) {
-                  audioQueueRef.current.addToQueue(bytes);
-                }
-              }
-              break;
-
-            case "response.audio_transcript.delta":
-              // Live TTS transcript from OpenAI
-              if (data.delta) {
-                setMessages((prev) => {
-                  const last = prev[prev.length - 1];
-                  const newContent = last?.role === "assistant" 
-                    ? last.content + data.delta 
-                    : data.delta;
-                  
-                  // Note: Whiteboard content is now shown on-demand via button click
-                  // No auto-popup - user controls when to view whiteboard
-                  
-                  if (last?.role === "assistant") {
-                    return prev.map((m, i) =>
-                      i === prev.length - 1 ? { ...m, content: m.content + data.delta } : m
+                  if (msgIdToUpdate) {
+                    setMessages((prev) =>
+                      prev.map((m) => (m.id === msgIdToUpdate ? { ...m, content: data.transcript } : m))
                     );
-                  }
-                  return [
-                    ...prev,
-                    {
+
+                    if (itemId) userItemToMessageIdRef.current.delete(itemId);
+                  } else {
+                    // Last-resort fallback
+                    const userMessage: Message = {
                       id: crypto.randomUUID(),
-                      role: "assistant",
-                      content: data.delta,
+                      role: "user",
+                      content: data.transcript,
                       timestamp: new Date(),
-                    },
-                  ];
-                });
-              }
-              break;
+                    };
+                    setMessages((prev) => [...prev, userMessage]);
+                  }
 
-            case "response.audio_transcript.done":
-              console.log("TTS transcript complete");
-              // Clean up the chat message by removing whiteboard markers (but keep original for detection)
-              setMessages((prev) => {
-                const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
-                if (lastAssistant) {
-                  const { hasWhiteboard } = extractWhiteboardContent(lastAssistant.content);
-                  // Clean up the chat message by removing whiteboard markers
-                  const cleanedContent = removeWhiteboardMarkers(lastAssistant.content);
-                  if (cleanedContent !== lastAssistant.content) {
-                    return prev.map((m) =>
-                      m.id === lastAssistant.id 
-                        ? { 
-                            ...m, 
-                            originalContent: lastAssistant.content, // Keep original for whiteboard button detection
-                            content: cleanedContent || (hasWhiteboard ? "I've prepared a detailed explanation. Click 'Whiteboard' to view." : lastAssistant.content)
-                          } 
-                        : m
-                    );
+                  setPartialTranscript("");
+                }
+                break;
+              }
+
+              case "conversation.item.input_audio_transcription.failed":
+                console.error("STT transcription failed:", data.error);
+                setPartialTranscript("");
+                break;
+
+              case "response.created":
+                console.log("AI response started - TTS will follow");
+                setIsProcessing(true);
+                setStatus("processing");
+                break;
+
+              case "response.output_item.added":
+                console.log("Response output item added:", data.item?.type);
+                break;
+
+              case "response.audio.delta":
+                // TTS audio from OpenAI Realtime API (shimmer voice)
+                setIsSpeaking(true);
+                setStatus("speaking");
+                setIsProcessing(false);
+                
+                // Convert base64 to Uint8Array (24kHz PCM16)
+                if (data.delta) {
+                  const binaryString = atob(data.delta);
+                  const bytes = new Uint8Array(binaryString.length);
+                  for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                  }
+                  
+                  // Send to Simli for lip-sync (primary) - resample 24kHz -> 16kHz
+                  if (simliSendAudioRef.current) {
+                    const resampled = resamplerRef.current.process(bytes);
+                    simliSendAudioRef.current(resampled);
+                  }
+                  
+                  // Use fallback audio queue if Simli is not available (keep at 24kHz)
+                  if (!simliSendAudioRef.current && audioQueueRef.current) {
+                    audioQueueRef.current.addToQueue(bytes);
                   }
                 }
-                return prev;
-              });
-              break;
+                break;
 
-            case "response.audio.done":
-              console.log("TTS audio stream complete");
-              break;
+              case "response.audio_transcript.delta":
+                // Live TTS transcript from OpenAI
+                if (data.delta) {
+                  setMessages((prev) => {
+                    const last = prev[prev.length - 1];
+                    const newContent = last?.role === "assistant" 
+                      ? last.content + data.delta 
+                      : data.delta;
+                    
+                    // Note: Whiteboard content is now shown on-demand via button click
+                    // No auto-popup - user controls when to view whiteboard
+                    
+                    if (last?.role === "assistant") {
+                      return prev.map((m, i) =>
+                        i === prev.length - 1 ? { ...m, content: m.content + data.delta } : m
+                      );
+                    }
+                    return [
+                      ...prev,
+                      {
+                        id: crypto.randomUUID(),
+                        role: "assistant",
+                        content: data.delta,
+                        timestamp: new Date(),
+                      },
+                    ];
+                  });
+                }
+                break;
 
-            case "response.output_item.done":
-              console.log("Response output item complete");
-              break;
+              case "response.audio_transcript.done":
+                console.log("TTS transcript complete");
+                // Clean up the chat message by removing whiteboard markers (but keep original for detection)
+                setMessages((prev) => {
+                  const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
+                  if (lastAssistant) {
+                    const { hasWhiteboard } = extractWhiteboardContent(lastAssistant.content);
+                    // Clean up the chat message by removing whiteboard markers
+                    const cleanedContent = removeWhiteboardMarkers(lastAssistant.content);
+                    if (cleanedContent !== lastAssistant.content) {
+                      return prev.map((m) =>
+                        m.id === lastAssistant.id 
+                          ? { 
+                              ...m, 
+                              originalContent: lastAssistant.content, // Keep original for whiteboard button detection
+                              content: cleanedContent || (hasWhiteboard ? "I've prepared a detailed explanation. Click 'Whiteboard' to view." : lastAssistant.content)
+                            } 
+                          : m
+                      );
+                    }
+                  }
+                  return prev;
+                });
+                break;
 
-            case "response.done":
-              console.log("Full response complete");
-              setIsSpeaking(false);
-              setIsProcessing(false);
-              setStatus("idle");
-              break;
+              case "response.audio.done":
+                console.log("TTS audio stream complete");
+                break;
 
-            case "rate_limits.updated":
-              console.log("Rate limits:", data.rate_limits);
-              break;
+              case "response.output_item.done":
+                console.log("Response output item complete");
+                break;
 
-            case "error":
-              console.error("OpenAI Realtime API Error:", data.error);
-              setIsProcessing(false);
-              setIsSpeaking(false);
-              setStatus("idle");
-              break;
+              case "response.done":
+                console.log("Full response complete");
+                setIsSpeaking(false);
+                setIsProcessing(false);
+                setStatus("idle");
+                break;
 
-            default:
-              console.log("Unhandled event type:", data.type);
+              case "rate_limits.updated":
+                console.log("Rate limits:", data.rate_limits);
+                break;
+
+              case "error":
+                console.error("OpenAI Realtime API Error:", data.error);
+                setIsProcessing(false);
+                setIsSpeaking(false);
+                setStatus("idle");
+                break;
+
+              default:
+                console.log("Unhandled event type:", data.type);
+            }
+          } catch (e) {
+            console.error("Error parsing message:", e);
           }
-        } catch (e) {
-          console.error("Error parsing message:", e);
-        }
-      };
+        };
 
-      ws.onerror = (error) => {
-        console.error("WebSocket error:", error);
-      };
+        ws.onerror = (error) => {
+          console.error("WebSocket error:", error);
+          clearTimeout(timeout);
+          reject(error);
+        };
 
-      ws.onclose = (event) => {
-        console.log("WebSocket closed", { code: event.code, reason: event.reason, wasClean: event.wasClean });
-        setIsConnected(false);
-        sessionCreatedRef.current = false;
-        isListeningRef.current = false;
-        setIsRecording(false);
-        setStatus("idle");
-      };
+        ws.onclose = (event) => {
+          console.log("WebSocket closed", { code: event.code, reason: event.reason, wasClean: event.wasClean });
+          clearTimeout(timeout);
+          setIsConnected(false);
+          sessionCreatedRef.current = false;
+          isListeningRef.current = false;
+          setIsRecording(false);
+          setStatus("idle");
+          
+          // Auto-reconnect if not a manual disconnect
+          if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+            const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptsRef.current), 8000);
+            console.log("WebSocket closed unexpectedly, reconnecting in", delay, "ms");
+            setTimeout(() => performReconnect(), delay);
+          }
+        };
+      });
     } catch (error) {
       console.error("Connection error:", error);
+      throw error;
     }
-  }, []);
+  }, [scheduleProactiveReconnect]);
+
+  // Public connect function
+  const connect = useCallback(async () => {
+    manualDisconnectRef.current = false;
+    reconnectAttemptsRef.current = 0;
+    await connectInternal();
+  }, [connectInternal]);
 
   const disconnect = useCallback(() => {
+    manualDisconnectRef.current = true;
     isListeningRef.current = false;
 
     // Clear pending state
     pendingUserMessageIdsRef.current = [];
     userItemToMessageIdRef.current.clear();
+    
+    // Clear reconnect timers
+    clearReconnectTimers();
     
     if (recorderRef.current) {
       recorderRef.current.stop();
@@ -734,10 +895,20 @@ ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation 
 
     audioQueueRef.current = null;
     sessionCreatedRef.current = false;
+    reconnectAttemptsRef.current = 0;
     setIsConnected(false);
+    setIsReconnecting(false);
     setIsRecording(false);
     setStatus("idle");
-  }, []);
+  }, [clearReconnectTimers]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      manualDisconnectRef.current = true;
+      disconnect();
+    };
+  }, [disconnect]);
 
   // Auto-listen function that starts after session is configured
   const startAutoListening = useCallback(async () => {
@@ -979,6 +1150,7 @@ Your text will be displayed alongside BSL hand sign animations. Please adapt you
     messages,
     partialTranscript,
     isConnected,
+    isReconnecting,
     isRecording,
     isProcessing,
     isSpeaking,
