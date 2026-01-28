@@ -1,176 +1,196 @@
 
 
-# BSL Speed & Text Input Fix Plan
+# Fix: Session Timeout at 3 Minutes
 
-## Issues Identified
+## Problem Analysis
 
-### 1. BSL Speed Too Fast
-The current timing at 1x speed is 800ms per sign, which is too fast for users to follow.
+The session is automatically ending after approximately 3 minutes and 18 seconds. This is caused by **Supabase Edge Function wall-clock limits**:
 
-**Root cause**: Line 118 in `BSLOverlay.tsx`:
-```typescript
-const delay = signs[currentSignIndex] === ' ' ? 300 : 800 / settings.speed;
-```
+| Plan | Maximum Duration |
+|------|-----------------|
+| Free | 150 seconds (2.5 min) |
+| Paid | 400 seconds (6.67 min) |
 
-At 1x speed: 800ms per sign (too fast)
-At 0.5x speed: 1600ms per sign
-At 2x speed: 400ms per sign (extremely fast)
-
-### 2. Speed Settings Not Working Properly
-The speed control exists but the formula makes "slower" settings show signs faster and "faster" settings show signs slower - which is backwards!
-
-**Fix needed**: Invert the speed calculation logic - higher speed = shorter delay.
-
-### 3. Text Input Disabled
-The text input in `TranscriptPanel.tsx` has `disabled` attribute hardcoded, preventing users from typing.
+The OpenAI Realtime API itself supports up to **60 minutes**, but the Supabase Edge Function proxy that connects your app to OpenAI has a hard timeout limit.
 
 ---
 
-## Solution
+## Solution Strategy
 
-### Part 1: Fix BSL Speed Timing
+Since we cannot extend Supabase's hard limit, we need a **seamless automatic reconnection system** that:
 
-**File: `src/components/BSLOverlay.tsx`**
+1. Detects when the connection drops (due to timeout or any reason)
+2. Automatically reconnects without user intervention
+3. Preserves conversation history across reconnections
+4. Shows a brief status indicator during reconnection
+5. Optionally warns the user before timeout to save context
 
-Changes:
-- Increase base delay from 800ms to 2000ms for comfortable viewing
-- Fix speed calculation: `baseDelay / speed` means 1x = 2000ms, 0.5x = 4000ms (slower), 2x = 1000ms (faster)
-- Increase pause between words from 300ms to 800ms
+---
 
-**Updated formula**:
-```typescript
-// Base delay of 2000ms at 1x speed
-// 0.25x = 8000ms (very slow)
-// 0.5x = 4000ms (slow) 
-// 1x = 2000ms (normal)
-// 1.5x = 1333ms (faster)
-// 2x = 1000ms (fast)
-const delay = signs[currentSignIndex] === ' ' ? 800 : 2000 / settings.speed;
+## Implementation Plan
+
+### Part 1: Configure Edge Runtime for WebSockets
+
+**File: `supabase/config.toml`**
+
+Add the `per_worker` policy to help WebSocket connections stay alive longer within the limits:
+
+```toml
+[edge_runtime]
+policy = "per_worker"
 ```
 
-### Part 2: Expand Speed Options
+This policy prevents the Edge Function from being terminated immediately after the WebSocket upgrade response is sent.
 
-**File: `src/components/BSLSettings.tsx`**
+---
 
-Changes:
-- Extend speed range from 0.25x to 2.5x (currently 0.5x to 2x)
-- Add finer step size of 0.1 (currently 0.25)
-- Add preset speed buttons (Slow, Normal, Fast)
+### Part 2: Implement Automatic Reconnection
 
-### Part 3: Enable Text Input
+**File: `src/hooks/useRealtimeChat.ts`**
 
-**File: `src/components/TranscriptPanel.tsx`**
+Add the following features:
 
-Changes:
-- Add state for text input value
-- Add `onSendText` callback prop
-- Remove `disabled` from input
-- Enable send button when text is entered
-- Add keyboard handler for Enter key
+1. **Reconnection State Variables**:
+   - `reconnectAttempts` counter
+   - `isReconnecting` flag
+   - `lastDisconnectTime` timestamp
+   - `connectionSessionId` to track sessions
+
+2. **Auto-Reconnect Logic**:
+   - When `proxy.openai_closed` or WebSocket `onclose` is detected, trigger reconnection
+   - Use exponential backoff: 1s, 2s, 4s (max 3 attempts)
+   - Preserve messages array during reconnection
+
+3. **Timeout Warning System**:
+   - Track connection time with `connectionStartTime`
+   - Warn user at 2 minutes ("Session will refresh in 30 seconds")
+   - Auto-reconnect before timeout hits (proactive reconnection)
+
+4. **Connection Health Monitor**:
+   - Detect if heartbeats are failing
+   - Trigger reconnection if connection becomes unhealthy
+
+---
+
+### Part 3: Update UI for Reconnection Status
 
 **File: `src/pages/Index.tsx`**
 
-Changes:
-- Add `handleSendText` function that uses `sendTextContent`
-- Pass handler to TranscriptPanel
+Add:
+- New `isReconnecting` state from the hook
+- Update connection status indicator to show "Reconnecting..." 
+- Brief overlay/toast during reconnection
+
+**File: `src/components/ControlBar.tsx` (or status indicator)**
+
+Update the connection status display to show three states:
+- Connected (green)
+- Connecting... (gray/pulsing)
+- Reconnecting... (orange/pulsing)
 
 ---
 
 ## Technical Details
 
-### BSLOverlay.tsx Changes
+### Auto-Reconnect Flow
 
-```typescript
-// Line 118 - Update timing calculation
-const delay = signs[currentSignIndex] === ' ' ? 800 : 2000 / settings.speed;
+```text
+Connection Timeline:
+[0:00]     Connected, session starts
+[2:00]     Warning toast: "Session refreshing soon..."
+[2:20]     Proactive reconnection initiated (before 2:30 timeout)
+           - Connection marked as "reconnecting"
+           - New WebSocket opened
+           - Old WebSocket closed
+           - Messages preserved
+[2:22]     New session connected
+           - Status back to "connected"
+           - User can continue seamlessly
+[4:20]     Next proactive reconnection...
 ```
 
-### BSLSettings.tsx Changes
+### useRealtimeChat.ts Changes
 
 ```typescript
-// Update slider range and add preset buttons
-<Slider
-  value={[settings.speed]}
-  onValueChange={([value]) => updateSetting('speed', value)}
-  min={0.25}  // Changed from 0.5
-  max={2.5}   // Changed from 2
-  step={0.1}  // Changed from 0.25
-  className="h-4"
-/>
+// New state
+const [isReconnecting, setIsReconnecting] = useState(false);
+const reconnectAttemptsRef = useRef(0);
+const connectionStartTimeRef = useRef<number | null>(null);
+const proactiveReconnectTimeoutRef = useRef<number | null>(null);
 
-// Add preset buttons
-<div className="flex gap-1 mt-1">
-  <Button size="sm" onClick={() => updateSetting('speed', 0.5)}>Slow</Button>
-  <Button size="sm" onClick={() => updateSetting('speed', 1)}>Normal</Button>
-  <Button size="sm" onClick={() => updateSetting('speed', 2)}>Fast</Button>
-</div>
-```
+// Connection time constants
+const SESSION_WARNING_TIME = 120000; // 2 minutes - warn user
+const PROACTIVE_RECONNECT_TIME = 140000; // 2:20 - reconnect before timeout
+const MAX_RECONNECT_ATTEMPTS = 5;
 
-### TranscriptPanel.tsx Changes
+// Schedule proactive reconnection (call after session.updated)
+const scheduleProactiveReconnect = useCallback(() => {
+  connectionStartTimeRef.current = Date.now();
+  
+  // Clear any existing timeout
+  if (proactiveReconnectTimeoutRef.current) {
+    clearTimeout(proactiveReconnectTimeoutRef.current);
+  }
+  
+  // Warning at 2 minutes
+  setTimeout(() => {
+    toast({
+      title: "Session refreshing soon",
+      description: "Connection will seamlessly refresh in 20 seconds.",
+    });
+  }, SESSION_WARNING_TIME);
+  
+  // Proactive reconnect at 2:20
+  proactiveReconnectTimeoutRef.current = window.setTimeout(() => {
+    console.log("Proactive reconnection triggered");
+    reconnect();
+  }, PROACTIVE_RECONNECT_TIME);
+}, []);
 
-```typescript
-// Add props
-interface TranscriptPanelProps {
-  // ... existing props
-  onSendText?: (text: string) => void;
-}
+// Reconnect function (separate from connect)
+const reconnect = useCallback(async () => {
+  if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+    toast({
+      title: "Connection Lost",
+      description: "Unable to maintain connection. Please click 'Call' to reconnect.",
+      variant: "destructive",
+    });
+    return;
+  }
 
-// Add state
-const [inputText, setInputText] = useState('');
+  setIsReconnecting(true);
+  reconnectAttemptsRef.current++;
 
-// Update input element
-<input
-  type="text"
-  value={inputText}
-  onChange={(e) => setInputText(e.target.value)}
-  onKeyDown={(e) => {
-    if (e.key === 'Enter' && inputText.trim() && onSendText) {
-      onSendText(inputText.trim());
-      setInputText('');
-    }
-  }}
-  placeholder="Type a message to Aria..."
-  className="flex-1 bg-transparent text-sm outline-none"
-/>
+  // Close existing connection gracefully
+  if (wsRef.current) {
+    wsRef.current.close();
+    wsRef.current = null;
+  }
 
-// Update send button
-<button 
-  onClick={() => {
-    if (inputText.trim() && onSendText) {
-      onSendText(inputText.trim());
-      setInputText('');
-    }
-  }}
-  disabled={!inputText.trim()}
-  className={cn(
-    "w-10 h-10 rounded-full flex items-center justify-center transition-colors",
-    inputText.trim() 
-      ? "bg-status-speaking text-white cursor-pointer hover:bg-status-speaking/80" 
-      : "bg-status-speaking text-white opacity-50 cursor-not-allowed"
-  )}
->
-  <Send className="w-5 h-5" />
-</button>
-```
+  // Brief delay before reconnecting
+  await new Promise(resolve => setTimeout(resolve, 500));
 
-### Index.tsx Changes
-
-```typescript
-// Add handler
-const handleSendText = useCallback((text: string) => {
-  if (!isConnected || !text.trim()) return;
-  sendTextContent(text, "Text Message");
+  // Reconnect
+  await connect();
+  setIsReconnecting(false);
+  reconnectAttemptsRef.current = 0;
+  
   toast({
-    title: "Message sent",
-    description: `Sent: "${text}"`,
+    title: "Connected",
+    description: "Session refreshed successfully.",
   });
-}, [isConnected, sendTextContent]);
+}, [connect]);
 
-// Pass to TranscriptPanel
-<TranscriptPanel
-  // ... existing props
-  onSendText={handleSendText}
-/>
+// Add to onclose handler
+ws.onclose = (event) => {
+  // ... existing code ...
+  
+  // Auto-reconnect if not a manual disconnect
+  if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 8000);
+    setTimeout(() => reconnect(), delay);
+  }
+};
 ```
 
 ---
@@ -179,25 +199,35 @@ const handleSendText = useCallback((text: string) => {
 
 | File | Changes |
 |------|---------|
-| `src/components/BSLOverlay.tsx` | Update delay from 800ms to 2000ms base |
-| `src/components/BSLSettings.tsx` | Expand speed range (0.25-2.5), finer steps, add presets |
-| `src/components/TranscriptPanel.tsx` | Enable text input, add state and handlers |
-| `src/pages/Index.tsx` | Add `handleSendText` and pass to TranscriptPanel |
+| `supabase/config.toml` | Add `[edge_runtime]` with `policy = "per_worker"` |
+| `src/hooks/useRealtimeChat.ts` | Add auto-reconnect logic, proactive reconnection, health monitoring |
+| `src/pages/Index.tsx` | Add `isReconnecting` state handling, update connection status |
 
 ---
 
 ## Expected Behavior After Fix
 
-### BSL Speed
-- **0.25x**: 8 seconds per sign (very slow, for learning)
-- **0.5x**: 4 seconds per sign (slow)
-- **1x**: 2 seconds per sign (comfortable default)
-- **1.5x**: 1.3 seconds per sign (faster)
-- **2x**: 1 second per sign (fast)
-- **2.5x**: 0.8 seconds per sign (very fast)
+1. **Session starts**: Timer begins, proactive reconnect scheduled for 2:20
+2. **At 2 minutes**: Toast notification warns user of upcoming refresh
+3. **At 2:20**: Automatic seamless reconnection (before 2:30 limit)
+4. **User experience**: Nearly invisible - maybe a brief "Reconnecting..." indicator
+5. **If unexpected disconnect**: Automatic retry with exponential backoff
+6. **After 5 failed attempts**: Manual reconnect required (with clear message)
 
-### Text Input
-- Users can type in the text box
-- Press Enter or click Send to send message
-- Message appears in chat and Aria responds
+---
+
+## Limitations
+
+- There will be a brief (~1-2 second) gap during reconnection where messages cannot be sent
+- If user is mid-speech during reconnection, that audio may be lost
+- The 60-minute OpenAI limit still applies (but we'll be well under that)
+- Conversation context on OpenAI side resets each reconnection (messages remain in UI)
+
+---
+
+## Alternative Approaches Considered
+
+1. **WebRTC instead of WebSocket**: OpenAI Realtime API supports WebRTC which might have different timeout characteristics, but requires significant architecture change
+2. **Different hosting for proxy**: Could host the relay server on a platform without timeout limits (e.g., dedicated server, Railway, Render), but adds complexity
+3. **Accept limitation and just reconnect faster**: Current approach - work within Supabase limits with seamless auto-reconnect
 
