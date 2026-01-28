@@ -1,0 +1,14 @@
+{
+  "name": "eduguide-realtime-proxy",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker proxy for OpenAI Realtime API",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "wrangler": "^3.22.1"
+  }
+}
