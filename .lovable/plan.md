@@ -1,233 +1,271 @@
 
+# Migration Plan: Supabase → Cloudflare Workers for WebSocket Proxy
 
-# Fix: Session Timeout at 3 Minutes
+## Overview
 
-## Problem Analysis
-
-The session is automatically ending after approximately 3 minutes and 18 seconds. This is caused by **Supabase Edge Function wall-clock limits**:
-
-| Plan | Maximum Duration |
-|------|-----------------|
-| Free | 150 seconds (2.5 min) |
-| Paid | 400 seconds (6.67 min) |
-
-The OpenAI Realtime API itself supports up to **60 minutes**, but the Supabase Edge Function proxy that connects your app to OpenAI has a hard timeout limit.
+This plan migrates the WebSocket proxy from Supabase Edge Functions (with 150s timeout) to Cloudflare Workers (with **no WebSocket timeout limit**), enabling unlimited session duration for your BSL teaching application.
 
 ---
 
-## Solution Strategy
+## What Changes
 
-Since we cannot extend Supabase's hard limit, we need a **seamless automatic reconnection system** that:
-
-1. Detects when the connection drops (due to timeout or any reason)
-2. Automatically reconnects without user intervention
-3. Preserves conversation history across reconnections
-4. Shows a brief status indicator during reconnection
-5. Optionally warns the user before timeout to save context
-
----
-
-## Implementation Plan
-
-### Part 1: Configure Edge Runtime for WebSockets
-
-**File: `supabase/config.toml`**
-
-Add the `per_worker` policy to help WebSocket connections stay alive longer within the limits:
-
-```toml
-[edge_runtime]
-policy = "per_worker"
-```
-
-This policy prevents the Edge Function from being terminated immediately after the WebSocket upgrade response is sent.
+| Component | Current | After Migration |
+|-----------|---------|-----------------|
+| WebSocket Proxy | Supabase Edge Function | Cloudflare Worker |
+| Session Limit | ~2.5 minutes (proactive reconnect) | Unlimited (up to OpenAI's 60 min) |
+| Auto-reconnect | Required every 2:20 | Only on network issues |
+| API Key Location | Supabase Secrets | Cloudflare Worker Secrets |
+| Cost | Included in Lovable | Cloudflare Free Tier (100k req/day) |
 
 ---
 
-### Part 2: Implement Automatic Reconnection
-
-**File: `src/hooks/useRealtimeChat.ts`**
-
-Add the following features:
-
-1. **Reconnection State Variables**:
-   - `reconnectAttempts` counter
-   - `isReconnecting` flag
-   - `lastDisconnectTime` timestamp
-   - `connectionSessionId` to track sessions
-
-2. **Auto-Reconnect Logic**:
-   - When `proxy.openai_closed` or WebSocket `onclose` is detected, trigger reconnection
-   - Use exponential backoff: 1s, 2s, 4s (max 3 attempts)
-   - Preserve messages array during reconnection
-
-3. **Timeout Warning System**:
-   - Track connection time with `connectionStartTime`
-   - Warn user at 2 minutes ("Session will refresh in 30 seconds")
-   - Auto-reconnect before timeout hits (proactive reconnection)
-
-4. **Connection Health Monitor**:
-   - Detect if heartbeats are failing
-   - Trigger reconnection if connection becomes unhealthy
-
----
-
-### Part 3: Update UI for Reconnection Status
-
-**File: `src/pages/Index.tsx`**
-
-Add:
-- New `isReconnecting` state from the hook
-- Update connection status indicator to show "Reconnecting..." 
-- Brief overlay/toast during reconnection
-
-**File: `src/components/ControlBar.tsx` (or status indicator)**
-
-Update the connection status display to show three states:
-- Connected (green)
-- Connecting... (gray/pulsing)
-- Reconnecting... (orange/pulsing)
-
----
-
-## Technical Details
-
-### Auto-Reconnect Flow
+## Architecture After Migration
 
 ```text
-Connection Timeline:
-[0:00]     Connected, session starts
-[2:00]     Warning toast: "Session refreshing soon..."
-[2:20]     Proactive reconnection initiated (before 2:30 timeout)
-           - Connection marked as "reconnecting"
-           - New WebSocket opened
-           - Old WebSocket closed
-           - Messages preserved
-[2:22]     New session connected
-           - Status back to "connected"
-           - User can continue seamlessly
-[4:20]     Next proactive reconnection...
+┌─────────────────┐    WebSocket    ┌────────────────────┐    WebSocket    ┌─────────────────┐
+│                 │ ──────────────► │                    │ ──────────────► │                 │
+│  React App      │                 │  Cloudflare Worker │                 │  OpenAI         │
+│  (Browser)      │ ◄────────────── │  (Your Proxy)      │ ◄────────────── │  Realtime API   │
+│                 │                 │                    │                 │                 │
+└─────────────────┘                 └────────────────────┘                 └─────────────────┘
+                                           │
+                                    No timeout limit!
+                                    Runs indefinitely
 ```
 
-### useRealtimeChat.ts Changes
+---
+
+## Step-by-Step Implementation
+
+### Step 1: Create Cloudflare Worker Project
+
+You'll need to:
+1. Create a free Cloudflare account at workers.cloudflare.com
+2. Install Wrangler CLI: `npm install -g wrangler`
+3. Login: `wrangler login`
+4. Create new worker: `wrangler init openai-realtime-proxy`
+
+### Step 2: Create Cloudflare Worker Code
+
+Create a new file `cloudflare-worker/src/index.ts`:
 
 ```typescript
-// New state
-const [isReconnecting, setIsReconnecting] = useState(false);
-const reconnectAttemptsRef = useRef(0);
-const connectionStartTimeRef = useRef<number | null>(null);
-const proactiveReconnectTimeoutRef = useRef<number | null>(null);
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    // Handle WebSocket upgrade
+    const upgradeHeader = request.headers.get("Upgrade");
+    if (upgradeHeader !== "websocket") {
+      return new Response("Expected WebSocket upgrade", { status: 426 });
+    }
 
-// Connection time constants
-const SESSION_WARNING_TIME = 120000; // 2 minutes - warn user
-const PROACTIVE_RECONNECT_TIME = 140000; // 2:20 - reconnect before timeout
-const MAX_RECONNECT_ATTEMPTS = 5;
+    const apiKey = env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return new Response("API key not configured", { status: 500 });
+    }
 
-// Schedule proactive reconnection (call after session.updated)
-const scheduleProactiveReconnect = useCallback(() => {
-  connectionStartTimeRef.current = Date.now();
-  
-  // Clear any existing timeout
-  if (proactiveReconnectTimeoutRef.current) {
-    clearTimeout(proactiveReconnectTimeoutRef.current);
-  }
-  
-  // Warning at 2 minutes
-  setTimeout(() => {
-    toast({
-      title: "Session refreshing soon",
-      description: "Connection will seamlessly refresh in 20 seconds.",
+    // Create WebSocket pair for client
+    const [client, server] = Object.values(new WebSocketPair());
+
+    // Connect to OpenAI
+    const openaiUrl = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
+    const openaiWs = new WebSocket(openaiUrl, [
+      "realtime",
+      `openai-insecure-api-key.${apiKey}`,
+      "openai-beta.realtime-v1",
+    ]);
+
+    // Handle OpenAI connection
+    server.accept();
+    
+    openaiWs.addEventListener("open", () => {
+      server.send(JSON.stringify({ type: "proxy.openai_connected" }));
+      
+      // Keepalive every 25 seconds
+      setInterval(() => {
+        if (openaiWs.readyState === WebSocket.OPEN) {
+          openaiWs.send(JSON.stringify({
+            type: "input_audio_buffer.append",
+            audio: "AA=="
+          }));
+        }
+      }, 25000);
     });
-  }, SESSION_WARNING_TIME);
-  
-  // Proactive reconnect at 2:20
-  proactiveReconnectTimeoutRef.current = window.setTimeout(() => {
-    console.log("Proactive reconnection triggered");
-    reconnect();
-  }, PROACTIVE_RECONNECT_TIME);
-}, []);
 
-// Reconnect function (separate from connect)
-const reconnect = useCallback(async () => {
-  if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
-    toast({
-      title: "Connection Lost",
-      description: "Unable to maintain connection. Please click 'Call' to reconnect.",
-      variant: "destructive",
+    openaiWs.addEventListener("message", (event) => {
+      if (server.readyState === WebSocket.OPEN) {
+        server.send(event.data);
+      }
     });
-    return;
-  }
 
-  setIsReconnecting(true);
-  reconnectAttemptsRef.current++;
+    openaiWs.addEventListener("close", (event) => {
+      server.send(JSON.stringify({
+        type: "proxy.openai_closed",
+        code: event.code,
+        reason: event.reason,
+      }));
+      server.close();
+    });
 
-  // Close existing connection gracefully
-  if (wsRef.current) {
-    wsRef.current.close();
-    wsRef.current = null;
-  }
+    openaiWs.addEventListener("error", () => {
+      server.send(JSON.stringify({
+        type: "proxy.error",
+        message: "OpenAI connection error",
+      }));
+    });
 
-  // Brief delay before reconnecting
-  await new Promise(resolve => setTimeout(resolve, 500));
+    // Forward client messages to OpenAI
+    server.addEventListener("message", (event) => {
+      if (openaiWs.readyState === WebSocket.OPEN) {
+        openaiWs.send(event.data);
+      }
+    });
 
-  // Reconnect
-  await connect();
-  setIsReconnecting(false);
-  reconnectAttemptsRef.current = 0;
-  
-  toast({
-    title: "Connected",
-    description: "Session refreshed successfully.",
-  });
-}, [connect]);
+    server.addEventListener("close", () => {
+      openaiWs.close();
+    });
 
-// Add to onclose handler
-ws.onclose = (event) => {
-  // ... existing code ...
-  
-  // Auto-reconnect if not a manual disconnect
-  if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 8000);
-    setTimeout(() => reconnect(), delay);
-  }
+    return new Response(null, { status: 101, webSocket: client });
+  },
 };
+
+interface Env {
+  OPENAI_API_KEY: string;
+}
 ```
 
+### Step 3: Configure Cloudflare Worker
+
+Create `cloudflare-worker/wrangler.toml`:
+
+```toml
+name = "eduguide-realtime-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# Enable Durable Objects for WebSocket handling
+[durable_objects]
+bindings = []
+```
+
+### Step 4: Add API Key to Cloudflare
+
+Run this command to securely add your OpenAI API key:
+
+```bash
+wrangler secret put OPENAI_API_KEY
+# Then paste your API key when prompted
+```
+
+### Step 5: Deploy Worker
+
+```bash
+cd cloudflare-worker
+wrangler deploy
+```
+
+This gives you a URL like: `wss://eduguide-realtime-proxy.YOUR_SUBDOMAIN.workers.dev`
+
+### Step 6: Update React App
+
+Modify `src/hooks/useRealtimeChat.ts`:
+
+```typescript
+// Change line 50 from:
+const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
+
+// To:
+const WEBSOCKET_URL = "wss://eduguide-realtime-proxy.YOUR_SUBDOMAIN.workers.dev";
+```
+
+### Step 7: Remove Auto-Reconnect (Simplify)
+
+Since Cloudflare has no timeout, we can remove the proactive reconnection logic:
+
+- Remove `SESSION_WARNING_TIME` constant
+- Remove `PROACTIVE_RECONNECT_TIME` constant  
+- Remove `scheduleProactiveReconnect` function
+- Remove warning toast at 2 minutes
+- Keep only the **unexpected disconnect** auto-reconnect (for network issues)
+
 ---
 
-## Files to Modify
+## Files to Create/Modify
 
-| File | Changes |
-|------|---------|
-| `supabase/config.toml` | Add `[edge_runtime]` with `policy = "per_worker"` |
-| `src/hooks/useRealtimeChat.ts` | Add auto-reconnect logic, proactive reconnection, health monitoring |
-| `src/pages/Index.tsx` | Add `isReconnecting` state handling, update connection status |
-
----
-
-## Expected Behavior After Fix
-
-1. **Session starts**: Timer begins, proactive reconnect scheduled for 2:20
-2. **At 2 minutes**: Toast notification warns user of upcoming refresh
-3. **At 2:20**: Automatic seamless reconnection (before 2:30 limit)
-4. **User experience**: Nearly invisible - maybe a brief "Reconnecting..." indicator
-5. **If unexpected disconnect**: Automatic retry with exponential backoff
-6. **After 5 failed attempts**: Manual reconnect required (with clear message)
+| File | Action | Description |
+|------|--------|-------------|
+| `cloudflare-worker/src/index.ts` | **Create** | Cloudflare Worker proxy code |
+| `cloudflare-worker/wrangler.toml` | **Create** | Worker configuration |
+| `cloudflare-worker/package.json` | **Create** | Worker dependencies |
+| `src/hooks/useRealtimeChat.ts` | **Modify** | Update WebSocket URL, simplify reconnect |
+| `supabase/functions/realtime-chat/` | **Optional Delete** | No longer needed |
 
 ---
 
-## Limitations
+## Cloudflare Free Tier Limits
 
-- There will be a brief (~1-2 second) gap during reconnection where messages cannot be sent
-- If user is mid-speech during reconnection, that audio may be lost
-- The 60-minute OpenAI limit still applies (but we'll be well under that)
-- Conversation context on OpenAI side resets each reconnection (messages remain in UI)
+| Feature | Free Limit |
+|---------|------------|
+| Requests/day | 100,000 |
+| WebSocket connections | Unlimited duration |
+| CPU time | 10ms per request (but WebSockets don't count) |
+| Data transfer | Unlimited |
+
+For your educational app, the free tier is more than sufficient.
 
 ---
 
-## Alternative Approaches Considered
+## Setup Instructions for User
 
-1. **WebRTC instead of WebSocket**: OpenAI Realtime API supports WebRTC which might have different timeout characteristics, but requires significant architecture change
-2. **Different hosting for proxy**: Could host the relay server on a platform without timeout limits (e.g., dedicated server, Railway, Render), but adds complexity
-3. **Accept limitation and just reconnect faster**: Current approach - work within Supabase limits with seamless auto-reconnect
+After I create the Cloudflare Worker code, you'll need to:
 
+1. **Create Cloudflare Account**
+   - Go to workers.cloudflare.com
+   - Sign up for free
+
+2. **Install Wrangler CLI**
+   ```bash
+   npm install -g wrangler
+   wrangler login
+   ```
+
+3. **Deploy the Worker**
+   ```bash
+   cd cloudflare-worker
+   wrangler secret put OPENAI_API_KEY  # Enter your key
+   wrangler deploy
+   ```
+
+4. **Copy Your Worker URL**
+   - After deploy, you'll see a URL like `https://eduguide-realtime-proxy.xxx.workers.dev`
+   - The WebSocket URL is `wss://` version of this
+
+5. **Update the App**
+   - I'll update the React code to use your new Worker URL
+
+---
+
+## Benefits After Migration
+
+1. **No more 3-minute disconnects** - Sessions can run up to 60 minutes (OpenAI limit)
+2. **Simpler code** - No proactive reconnection timers needed
+3. **Better user experience** - No "Session refreshing..." interruptions
+4. **Global edge network** - Cloudflare runs in 200+ cities worldwide
+5. **Free** - 100,000 requests/day is plenty for education use
+
+---
+
+## Migration Approach
+
+I recommend a **two-phase approach**:
+
+**Phase 1 (Now)**: Create the Cloudflare Worker files in your project so you can deploy them
+
+**Phase 2 (After you deploy)**: Update the React app to use the new Cloudflare URL
+
+This way, you can test the Cloudflare Worker independently before switching the app.
+
+---
+
+## Summary
+
+This migration eliminates the session timeout problem by moving to Cloudflare Workers, which has no WebSocket duration limits. Your students will be able to have continuous 60-minute learning sessions without any interruptions.
