@@ -537,16 +537,19 @@ ONLY respond WITHOUT the whiteboard for simple greetings or casual conversation 
                 }
                 heartbeatIntervalRef.current = window.setInterval(() => {
                   if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    // Send a minimal audio buffer to keep connection alive
-                    // This is a lightweight ping that OpenAI accepts
+                    // Send a minimal valid PCM16 audio buffer to keep connection alive
+                    // PCM16 requires 2 bytes per sample - "AAAA" = 3 bytes still invalid
+                    // Using 480 samples of silence (20ms at 24kHz) = 960 bytes
+                    // This is the minimum recommended by OpenAI for audio chunks
+                    const silenceBuffer = new Uint8Array(960); // 480 samples * 2 bytes = 20ms of silence
+                    const base64Silence = btoa(String.fromCharCode(...silenceBuffer));
                     wsRef.current.send(JSON.stringify({
                       type: "input_audio_buffer.append",
-                      // Send a tiny chunk of silence (1 sample) to avoid some servers closing on empty payloads.
-                      audio: "AA=="
+                      audio: base64Silence
                     }));
                     console.log("Heartbeat sent to keep connection alive");
                   }
-                }, 15000); // Every 15 seconds (reduced from 25s)
+                }, 15000); // Every 15 seconds
                 break;
 
               case "input_audio_buffer.speech_started":

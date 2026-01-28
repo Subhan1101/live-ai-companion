@@ -65,14 +65,17 @@ serve(async (req) => {
         clientSocket.send(JSON.stringify({ type: "proxy.openai_connected" }));
       }
       
-      // Start keepalive ping to OpenAI every 12 seconds (reduced from 20s)
-      // More frequent pings help prevent session timeouts around 3 minutes
+      // Start keepalive ping to OpenAI every 12 seconds
+      // Send valid PCM16 silence (480 samples = 20ms at 24kHz = 960 bytes)
       keepaliveInterval = setInterval(() => {
         if (openaiSocket?.readyState === WebSocket.OPEN) {
-          // Send minimal audio buffer as keepalive
+          // Create 960 bytes of silence (480 PCM16 samples)
+          const silenceBuffer = new Uint8Array(960);
+          // Convert to base64 using Deno's btoa
+          const base64Silence = btoa(String.fromCharCode(...silenceBuffer));
           openaiSocket.send(JSON.stringify({
             type: "input_audio_buffer.append",
-            audio: "AA==" // 1 sample of silence
+            audio: base64Silence
           }));
           console.log("Keepalive ping sent to OpenAI");
         }

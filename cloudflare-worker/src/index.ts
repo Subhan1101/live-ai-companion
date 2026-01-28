@@ -45,13 +45,16 @@ export default {
         server.send(JSON.stringify({ type: "proxy.openai_connected" }));
       }
 
-      // Keepalive ping every 25 seconds to prevent idle disconnect
+      // Keepalive ping every 25 seconds with valid PCM16 silence
+      // 480 samples at 24kHz = 20ms = 960 bytes
       keepaliveInterval = setInterval(() => {
         if (openaiWs.readyState === WebSocket.OPEN) {
+          const silenceBuffer = new Uint8Array(960);
+          const base64Silence = btoa(String.fromCharCode(...silenceBuffer));
           openaiWs.send(
             JSON.stringify({
               type: "input_audio_buffer.append",
-              audio: "AA==", // 1 sample of silence
+              audio: base64Silence,
             })
           );
         }
