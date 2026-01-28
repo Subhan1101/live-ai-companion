@@ -3,6 +3,8 @@ import { Mic, MicOff, Video, VideoOff, RefreshCw, Hand } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBSLRecognition } from "@/hooks/useBSLRecognition";
 import BSLInputOverlay from "@/components/BSLInputOverlay";
+import BSLOverlay from "@/components/BSLOverlay";
+import { type BSLSettingsState } from "@/components/BSLSettings";
 
 interface VideoPanelProps {
   userName: string;
@@ -10,9 +12,26 @@ interface VideoPanelProps {
   isMuted: boolean;
   isCameraOn?: boolean;
   onBSLInput?: (text: string) => void;
+  // BSL display props
+  isBSLEnabled?: boolean;
+  bslText?: string;
+  bslSettings?: BSLSettingsState;
+  onBSLSettingsChange?: (settings: BSLSettingsState) => void;
+  onBSLClose?: () => void;
 }
 
-export const VideoPanel = ({ userName, isSpeaking, isMuted, isCameraOn = true, onBSLInput }: VideoPanelProps) => {
+export const VideoPanel = ({ 
+  userName, 
+  isSpeaking, 
+  isMuted, 
+  isCameraOn = true, 
+  onBSLInput,
+  isBSLEnabled = false,
+  bslText = '',
+  bslSettings,
+  onBSLSettingsChange,
+  onBSLClose,
+}: VideoPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasVideo, setHasVideo] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +148,17 @@ export const VideoPanel = ({ userName, isSpeaking, isMuted, isCameraOn = true, o
 
   return (
     <div className="panel-card flex flex-col h-full relative overflow-hidden">
+      {/* BSL Overlay */}
+      {isBSLEnabled && bslSettings && onBSLSettingsChange && onBSLClose && (
+        <BSLOverlay
+          text={bslText}
+          isActive={isBSLEnabled}
+          settings={bslSettings}
+          onSettingsChange={onBSLSettingsChange}
+          onClose={onBSLClose}
+        />
+      )}
+
       {/* Video display */}
       <div className="flex-1 bg-[#1a1f2e] relative flex items-center justify-center">
         {/* Always render video element */}

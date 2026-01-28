@@ -357,11 +357,6 @@ const Index = () => {
               audioLevel={audioLevel}
               isConnected={isConnected}
               onSimliReady={handleSimliReady}
-              isBSLEnabled={isBSLEnabled}
-              bslText={bslResponseText}
-              bslSettings={bslSettings}
-              onBSLSettingsChange={setBslSettings}
-              onBSLClose={handleBSLClose}
             />
           </div>
 
@@ -373,6 +368,11 @@ const Index = () => {
               isMuted={!isMicOn}
               isCameraOn={isCameraOn}
               onBSLInput={handleBSLInput}
+              isBSLEnabled={isBSLEnabled}
+              bslText={bslResponseText}
+              bslSettings={bslSettings}
+              onBSLSettingsChange={setBslSettings}
+              onBSLClose={handleBSLClose}
             />
           </div>
 

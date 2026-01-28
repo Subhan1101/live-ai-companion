@@ -2,8 +2,6 @@ import { useRef, useEffect, useState } from "react";
 import { Mic } from "lucide-react";
 import { SimliClient } from "simli-client";
 import { supabase } from "@/integrations/supabase/client";
-import BSLOverlay from "./BSLOverlay";
-import { type BSLSettingsState } from "./BSLSettings";
 
 // Fixed avatar configuration
 const AVATAR_FACE_ID = "5fc23ea5-8175-4a82-aaaf-cdd8c88543dc";
@@ -17,12 +15,6 @@ interface AvatarPanelProps {
   audioLevel: number;
   isConnected: boolean;
   onSimliReady?: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
-  // BSL props
-  isBSLEnabled?: boolean;
-  bslText?: string;
-  bslSettings?: BSLSettingsState;
-  onBSLSettingsChange?: (settings: BSLSettingsState) => void;
-  onBSLClose?: () => void;
 }
 
 const WaveformVisualizer = ({ audioLevel, isActive }: { audioLevel: number; isActive: boolean }) => {
@@ -55,11 +47,6 @@ export const AvatarPanel = ({
   audioLevel,
   isConnected,
   onSimliReady,
-  isBSLEnabled = false,
-  bslText = '',
-  bslSettings,
-  onBSLSettingsChange,
-  onBSLClose,
 }: AvatarPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -210,17 +197,6 @@ export const AvatarPanel = ({
 
   return (
     <div className="panel-card avatar-panel flex flex-col h-full relative overflow-hidden">
-      {/* BSL Overlay */}
-      {isBSLEnabled && bslSettings && onBSLSettingsChange && onBSLClose && (
-        <BSLOverlay
-          text={bslText}
-          isActive={isBSLEnabled}
-          settings={bslSettings}
-          onSettingsChange={onBSLSettingsChange}
-          onClose={onBSLClose}
-        />
-      )}
-
       {/* Simli Avatar Video */}
       <div className="absolute inset-0 flex items-center justify-center">
         <video
