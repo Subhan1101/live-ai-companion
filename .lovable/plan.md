@@ -1,153 +1,109 @@
 
+# Plan: Brief Answers First with Optional Detailed Whiteboard Explanations
 
-# Fix Plan: Avatar Not Loading & Voice Commands Not Working
+## What You Want
 
-## Problem Analysis
+You want EduGuide to:
+1. **Give a short, simple answer first** when you ask any question
+2. **Ask at the end**: "Would you like me to explain this in more detail on the whiteboard?"
+3. **Only show the whiteboard** when you specifically ask for a detailed explanation
 
-Based on my investigation of console logs, edge function logs, and code analysis, I've identified **three interconnected issues**:
-
-### Issue 1: Microphone Permission Denied
-The console logs show repeated errors:
-```
-NotAllowedError: Permission denied
-Error accessing microphone
-Failed to start auto-listening
-```
-
-**Root Cause:** The app tries to auto-start the microphone immediately after WebSocket connection, but browsers require a user gesture (click) before granting microphone permissions. The current flow violates this browser security policy.
-
-### Issue 2: Avatar Loading Successfully (NOT broken)
-Looking at the network logs, the Simli avatar is actually initializing correctly:
-- `POST /simli-token` → 200 OK
-- `POST /startAudioToVideoSession` → 200 OK with valid session token
-
-The avatar itself is loading fine. The issue is that without microphone access, there's no audio flowing to the system, making it appear broken.
-
-### Issue 3: WebSocket Connections Are Working
-Edge function logs show successful connections to OpenAI:
-```
-Client connected, establishing connection to OpenAI...
-Connected to OpenAI Realtime API
-Keepalive ping sent to OpenAI (repeating every 6-12 seconds)
-```
-
-The WebSocket proxy is functioning correctly. The problem is purely on the client-side microphone initialization.
+This makes conversations faster and gives you control over how much detail you receive.
 
 ---
 
-## Root Cause Summary
+## How It Works Now vs. How It Will Work
 
-The system works in this order:
-1. Page loads → Auto-connects WebSocket (OK)
-2. WebSocket connects → Sends session configuration (OK)
-3. Session configured → **Auto-starts microphone WITHOUT user click** (FAILS)
-4. Microphone denied → No audio sent → Avatar sits idle
-
----
-
-## Solution
-
-Remove the automatic microphone start and require a user gesture (button click) to enable the microphone. This follows browser security requirements and provides a better user experience.
-
-### Technical Details
-
-**File: `src/hooks/useRealtimeChat.ts`**
-
-1. **Remove auto-listen trigger after session.updated**
-   - Currently, when the session is configured, it immediately calls `startAutoListening()`
-   - Change: Wait for user to click the microphone button instead
-
-2. **Update session.updated handler** (around lines 490-510)
-   - Remove the automatic call to `startAutoListening()` and `scheduleProactiveReconnect()`
-   - Only schedule the proactive reconnect timer
-
-**File: `src/pages/Index.tsx`**
-
-3. **Show a clear "Click to enable microphone" indicator**
-   - When connected but not recording, show a prompt to click the mic button
-   - The existing `handleToggleMic` function already handles starting the recording on click
-
-4. **Add toast notification on connection**
-   - Inform user they need to click the microphone button to start speaking
+| Current Behavior | New Behavior |
+|-----------------|--------------|
+| Any educational question shows detailed whiteboard immediately | Gives brief answer first |
+| No choice - always get full explanation | Asks if you want more detail |
+| Whiteboard pops up automatically | Whiteboard only appears when you ask for explanation |
 
 ---
 
-## Step-by-Step Changes
+## What Will Change
 
-### Step 1: Stop Auto-Starting Microphone
-In `useRealtimeChat.ts`, locate the `session.updated` case handler and remove the call to `startAutoListening()`.
+### File: `src/hooks/useRealtimeChat.ts`
 
-**Current code (around line 500):**
-```typescript
-case "session.updated":
-  console.log("Session updated with our configuration");
-  // Schedule proactive reconnect after session is configured
-  scheduleProactiveReconnect();
-  // Start heartbeat
-  heartbeatIntervalRef.current = window.setInterval(...);
-  // Auto-start listening after session configured
-  startAutoListening(); // ← REMOVE THIS
-  break;
+I will update the AI teacher's instructions (the system prompt) to:
+
+**1. New Response Flow:**
+- First: Give a brief, direct answer (2-4 sentences max)
+- Then: Ask "Would you like me to explain this in detail on the whiteboard?"
+- Only use `[WHITEBOARD_START]...[WHITEBOARD_END]` when:
+  - User says "yes", "explain", "more detail", "show me on whiteboard", etc.
+  - User specifically requests step-by-step or detailed explanation
+
+**2. Updated Instructions:**
+```text
+RESPONSE FLOW (CRITICAL):
+
+1. BRIEF ANSWER FIRST:
+   - For ANY question, give a short, direct answer first (2-4 sentences maximum)
+   - Get straight to the point - what's the answer/concept?
+   
+2. OFFER DETAILED EXPLANATION:
+   - After the brief answer, ALWAYS ask: "Would you like me to explain this 
+     in detail on the whiteboard?"
+   
+3. WHITEBOARD ONLY ON REQUEST:
+   - ONLY use [WHITEBOARD_START]...[WHITEBOARD_END] markers when the user:
+     - Says "yes", "explain", "more detail", "show me", "break it down"
+     - Explicitly asks for step-by-step explanation
+     - Requests to see it on the whiteboard
+   
+4. SIMPLE GREETINGS:
+   - For "hello", "hi", etc. - just respond warmly without offering whiteboard
 ```
 
-**New code:**
-```typescript
-case "session.updated":
-  console.log("Session updated with our configuration");
-  // Schedule proactive reconnect after session is configured
-  scheduleProactiveReconnect();
-  // Start heartbeat
-  heartbeatIntervalRef.current = window.setInterval(...);
-  // Note: Microphone will be started when user clicks the mic button
-  // This is required by browser security policies
-  console.log("Ready for voice input - user must click microphone to enable");
-  break;
+**3. Example Conversations:**
+
+**Example 1 - Brief Answer:**
+```
+User: "Tell me about artificial intelligence"
+AI: "Artificial intelligence (AI) is technology that enables computers to 
+    learn and make decisions like humans. It's used in things like voice 
+    assistants, self-driving cars, and recommendation systems.
+    
+    Would you like me to explain this in more detail on the whiteboard?"
 ```
 
-### Step 2: Update Connection Success Toast
-In `Index.tsx`, update the toast shown when connecting to prompt user action.
-
-**Current code:**
-```typescript
-connect();
-toast({
-  title: "Calling...",
-  description: "Connecting to Aria.",
-});
+**Example 2 - User Asks for More:**
+```
+User: "Yes, explain more"
+AI: [WHITEBOARD_START]
+    ## Title: Understanding Artificial Intelligence
+    ### Overview
+    ... detailed explanation ...
+    [WHITEBOARD_END]
 ```
 
-**Enhanced:** After successful connection, show a toast prompting microphone action. This can be done by adding an effect that watches `isConnected` state.
-
-### Step 3: Add Visual Microphone Prompt
-In `Index.tsx`, when connected but not recording, display a visual indicator near the control bar or overlay prompting the user to click the microphone.
+**Example 3 - Math Problem:**
+```
+User: "Solve x^2 - 5x + 6 = 0"
+AI: "The solutions are x = 2 and x = 3. These are the two values that 
+    make the equation equal zero.
+    
+    Would you like me to show you the step-by-step solution on the 
+    whiteboard?"
+```
 
 ---
 
-## Summary of Changes
+## Technical Changes Summary
 
 | File | Change |
 |------|--------|
-| `src/hooks/useRealtimeChat.ts` | Remove `startAutoListening()` call from `session.updated` handler |
-| `src/pages/Index.tsx` | Add effect to show toast prompting user to click microphone after connection |
-| `src/pages/Index.tsx` | Add visual "Click mic to talk" indicator when connected but not recording |
+| `src/hooks/useRealtimeChat.ts` | Update system prompt with new "brief first, then offer detail" instructions |
 
 ---
 
-## Expected Behavior After Fix
+## Expected Behavior After Changes
 
-1. User opens page → WebSocket connects automatically
-2. Avatar loads and displays "Say something!" status
-3. Toast appears: "Connected! Click the microphone to start talking"
-4. User clicks microphone button → Browser shows permission prompt
-5. User grants permission → Microphone activates, voice commands work
-6. User speaks → AI responds with voice and avatar lip-sync
+1. You ask a question → Get a quick, short answer
+2. AI asks if you want more detail
+3. You say "yes" or "explain" → Full whiteboard explanation appears
+4. You say nothing or move on → No whiteboard, continue with other questions
 
----
-
-## Why This Will Work
-
-- Browsers universally require user gestures for microphone access
-- The existing `handleToggleMic()` in Index.tsx is already designed to handle this flow
-- The existing `startRecording()` function works correctly when called from a click handler
-- The WebSocket and Simli avatar systems are already working correctly
-
+This gives you complete control over the depth of each answer!
