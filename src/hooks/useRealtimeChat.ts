@@ -50,8 +50,8 @@ interface UseRealtimeChatReturn {
 const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
 
 // Auto-reconnect constants
-const SESSION_WARNING_TIME = 120000; // 2 minutes - warn user
-const PROACTIVE_RECONNECT_TIME = 140000; // 2:20 - reconnect before timeout
+const SESSION_WARNING_TIME = 70000; // 1 min 10s - warn user & set reconnecting flag
+const PROACTIVE_RECONNECT_TIME = 90000; // 1 min 30s - reconnect before backend timeout (~120s)
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY = 1000; // 1 second base delay for exponential backoff
 
@@ -202,9 +202,11 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     // Clear any existing timers
     clearReconnectTimers();
     
-    // Warning at 2 minutes
+    // Warning at 70s - also set reconnecting flag early to guard against race condition
     warningTimeoutRef.current = window.setTimeout(() => {
-      console.log("Session warning: will refresh in 20 seconds");
+      console.log("Session warning: will refresh in 20 seconds, setting isReconnecting flag");
+      isReconnectingRef.current = true;
+      setIsReconnecting(true);
       toast({
         title: "Session refreshing soon",
         description: "Connection will seamlessly refresh in 20 seconds.",
@@ -363,8 +365,9 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               case "proxy.openai_closed": {
                 console.error("OpenAI connection closed (via proxy):", data);
 
-                // Don't tear down state or show toast if we're doing a proactive reconnect
-                if (!isReconnectingRef.current) {
+                // Don't tear down state if we're doing a proactive reconnect OR one is scheduled
+                const reconnectPending = isReconnectingRef.current || proactiveReconnectTimeoutRef.current !== null;
+                if (!reconnectPending) {
                   const isKeepaliveTimeout = data.code === 1005 || data.code === 1011;
                   
                   const description =
