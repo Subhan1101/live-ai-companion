@@ -93,6 +93,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
 
   // Auto-reconnect state
   const manualDisconnectRef = useRef(false);
+  const isReconnectingRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const connectionStartTimeRef = useRef<number | null>(null);
   const proactiveReconnectTimeoutRef = useRef<number | null>(null);
@@ -229,12 +230,14 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
         variant: "destructive",
       });
       setIsReconnecting(false);
+      isReconnectingRef.current = false;
       setIsConnected(false);
       return;
     }
 
     console.log("Performing reconnect, attempt:", reconnectAttemptsRef.current + 1);
     setIsReconnecting(true);
+    isReconnectingRef.current = true;
     reconnectAttemptsRef.current++;
 
     // Stop recording during reconnect
@@ -272,6 +275,7 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
     try {
       await connectInternal();
       setIsReconnecting(false);
+      isReconnectingRef.current = false;
       reconnectAttemptsRef.current = 0;
       
       toast({
@@ -359,8 +363,8 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
               case "proxy.openai_closed": {
                 console.error("OpenAI connection closed (via proxy):", data);
 
-                // Don't show error toast if we're doing a proactive reconnect
-                if (!isReconnecting) {
+                // Don't tear down state or show toast if we're doing a proactive reconnect
+                if (!isReconnectingRef.current) {
                   const isKeepaliveTimeout = data.code === 1005 || data.code === 1011;
                   
                   const description =
@@ -378,16 +382,18 @@ export const useRealtimeChat = (): UseRealtimeChatReturn => {
                       description,
                     });
                   }
-                }
 
-                setIsConnected(false);
-                setIsProcessing(false);
-                setIsSpeaking(false);
-                setStatus("idle");
-                
-                // Auto-reconnect if not a manual disconnect
-                if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-                  performReconnect();
+                  setIsConnected(false);
+                  setIsProcessing(false);
+                  setIsSpeaking(false);
+                  setStatus("idle");
+                  
+                  // Auto-reconnect if not a manual disconnect
+                  if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+                    performReconnect();
+                  }
+                } else {
+                  console.log("Ignoring proxy.openai_closed during proactive reconnect");
                 }
                 break;
               }
@@ -870,17 +876,23 @@ RESPONSE RULES:
         ws.onclose = (event) => {
           console.log("WebSocket closed", { code: event.code, reason: event.reason, wasClean: event.wasClean });
           clearTimeout(timeout);
-          setIsConnected(false);
           sessionCreatedRef.current = false;
           isListeningRef.current = false;
           setIsRecording(false);
-          setStatus("idle");
           
-          // Auto-reconnect if not a manual disconnect
-          if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-            const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptsRef.current), 8000);
-            console.log("WebSocket closed unexpectedly, reconnecting in", delay, "ms");
-            setTimeout(() => performReconnect(), delay);
+          // Don't set isConnected=false during proactive reconnects to keep avatar alive
+          if (!isReconnectingRef.current) {
+            setIsConnected(false);
+            setStatus("idle");
+            
+            // Auto-reconnect if not a manual disconnect
+            if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+              const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptsRef.current), 8000);
+              console.log("WebSocket closed unexpectedly, reconnecting in", delay, "ms");
+              setTimeout(() => performReconnect(), delay);
+            }
+          } else {
+            console.log("WebSocket closed during proactive reconnect - keeping avatar alive");
           }
         };
       });
