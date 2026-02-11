@@ -14,6 +14,7 @@ interface AvatarPanelProps {
   onMicRelease: () => void;
   audioLevel: number;
   isConnected: boolean;
+  isReconnecting?: boolean;
   onSimliReady?: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
 }
 
@@ -46,6 +47,7 @@ export const AvatarPanel = ({
   onMicRelease,
   audioLevel,
   isConnected,
+  isReconnecting = false,
   onSimliReady,
 }: AvatarPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -56,14 +58,40 @@ export const AvatarPanel = ({
 
   // Initialize Simli client when connected
   useEffect(() => {
-    // Only initialize when connected
+    // Only initialize when connected, but DON'T tear down during reconnects
     if (!isConnected) {
-      // Clean up when disconnected
+      // Skip cleanup if we're just reconnecting - keep avatar alive
+      if (isReconnecting) {
+        console.log("Skipping Simli cleanup during reconnect");
+        return;
+      }
+      // Clean up when fully disconnected (not reconnecting)
       if (simliClientRef.current) {
         console.log("Cleaning up Simli client on disconnect");
         simliClientRef.current.close();
         simliClientRef.current = null;
         setIsSimliReady(false);
+      }
+      return;
+    }
+
+    // If Simli is already initialized and ready, don't reinitialize on reconnect
+    if (simliClientRef.current && isSimliReady) {
+      console.log("Simli already active, skipping re-initialization on reconnect");
+      // Re-provide audio handler to parent in case it was lost
+      if (onSimliReady) {
+        onSimliReady(
+          (audioData: Uint8Array) => {
+            if (simliClientRef.current) {
+              simliClientRef.current.sendAudioData(audioData);
+            }
+          },
+          () => {
+            if (simliClientRef.current) {
+              simliClientRef.current.ClearBuffer();
+            }
+          }
+        );
       }
       return;
     }
@@ -168,7 +196,7 @@ export const AvatarPanel = ({
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [isConnected, onSimliReady]);
+  }, [isConnected, isReconnecting, onSimliReady]);
 
   // Cleanup on unmount
   useEffect(() => {

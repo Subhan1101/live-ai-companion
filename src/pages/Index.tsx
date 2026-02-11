@@ -366,6 +366,7 @@ const Index = () => {
               onMicRelease={handleMicRelease}
               audioLevel={audioLevel}
               isConnected={isConnected}
+              isReconnecting={isReconnecting}
               onSimliReady={handleSimliReady}
             />
           </div>
