@@ -1,109 +1,90 @@
 
-# Plan: Brief Answers First with Optional Detailed Whiteboard Explanations
 
-## What You Want
+# Plan: Fix Avatar Disappearing During Session Refresh
 
-You want EduGuide to:
-1. **Give a short, simple answer first** when you ask any question
-2. **Ask at the end**: "Would you like me to explain this in more detail on the whiteboard?"
-3. **Only show the whiteboard** when you specifically ask for a detailed explanation
+## Root Cause Analysis
 
-This makes conversations faster and gives you control over how much detail you receive.
+After examining the edge function logs and the reconnection code, I identified a **timing race condition**:
 
----
+### What's Happening
 
-## How It Works Now vs. How It Will Work
+1. The backend function has a wall-clock timeout of approximately **120 seconds** (Supabase limit)
+2. Your proactive reconnect timer is set to **140 seconds** (2 minutes 20 seconds)
+3. The backend dies BEFORE your proactive reconnect fires
+4. This causes an **unplanned disconnect** that resets `isConnected` to `false`, which tears down the avatar
 
-| Current Behavior | New Behavior |
-|-----------------|--------------|
-| Any educational question shows detailed whiteboard immediately | Gives brief answer first |
-| No choice - always get full explanation | Asks if you want more detail |
-| Whiteboard pops up automatically | Whiteboard only appears when you ask for explanation |
+### Timeline of the Bug
 
----
-
-## What Will Change
-
-### File: `src/hooks/useRealtimeChat.ts`
-
-I will update the AI teacher's instructions (the system prompt) to:
-
-**1. New Response Flow:**
-- First: Give a brief, direct answer (2-4 sentences max)
-- Then: Ask "Would you like me to explain this in detail on the whiteboard?"
-- Only use `[WHITEBOARD_START]...[WHITEBOARD_END]` when:
-  - User says "yes", "explain", "more detail", "show me on whiteboard", etc.
-  - User specifically requests step-by-step or detailed explanation
-
-**2. Updated Instructions:**
 ```text
-RESPONSE FLOW (CRITICAL):
-
-1. BRIEF ANSWER FIRST:
-   - For ANY question, give a short, direct answer first (2-4 sentences maximum)
-   - Get straight to the point - what's the answer/concept?
-   
-2. OFFER DETAILED EXPLANATION:
-   - After the brief answer, ALWAYS ask: "Would you like me to explain this 
-     in detail on the whiteboard?"
-   
-3. WHITEBOARD ONLY ON REQUEST:
-   - ONLY use [WHITEBOARD_START]...[WHITEBOARD_END] markers when the user:
-     - Says "yes", "explain", "more detail", "show me", "break it down"
-     - Explicitly asks for step-by-step explanation
-     - Requests to see it on the whiteboard
-   
-4. SIMPLE GREETINGS:
-   - For "hello", "hi", etc. - just respond warmly without offering whiteboard
+0s        Connect to backend
+~12s      Keepalive pings start (every 12s in edge function)
+~100s     Still connected, pings working
+~110-120s Backend function killed by platform timeout
+          --> proxy.openai_closed message sent to client
+          --> Client sees isReconnectingRef = false (proactive reconnect hasn't fired yet!)
+          --> Client sets isConnected = false
+          --> Avatar unmounts, shows "Teacher is coming..."
+          --> "Reconnecting..." badge appears
+140s      Proactive reconnect timer fires (TOO LATE - connection already dead)
 ```
 
-**3. Example Conversations:**
+### Evidence from Logs
 
-**Example 1 - Brief Answer:**
-```
-User: "Tell me about artificial intelligence"
-AI: "Artificial intelligence (AI) is technology that enables computers to 
-    learn and make decisions like humans. It's used in things like voice 
-    assistants, self-driving cars, and recommendation systems.
-    
-    Would you like me to explain this in more detail on the whiteboard?"
-```
-
-**Example 2 - User Asks for More:**
-```
-User: "Yes, explain more"
-AI: [WHITEBOARD_START]
-    ## Title: Understanding Artificial Intelligence
-    ### Overview
-    ... detailed explanation ...
-    [WHITEBOARD_END]
-```
-
-**Example 3 - Math Problem:**
-```
-User: "Solve x^2 - 5x + 6 = 0"
-AI: "The solutions are x = 2 and x = 3. These are the two values that 
-    make the equation equal zero.
-    
-    Would you like me to show you the step-by-step solution on the 
-    whiteboard?"
-```
+The edge function logs show connections lasting only about 90-120 seconds before "shutdown" and "OpenAI connection closed: 1005" appear, well before the 140-second proactive reconnect.
 
 ---
 
-## Technical Changes Summary
+## The Fix (3 Changes)
+
+### 1. Reduce Proactive Reconnect Time
+
+Change `PROACTIVE_RECONNECT_TIME` from 140 seconds to **90 seconds**, and the warning time to **70 seconds**. This ensures the client reconnects well BEFORE the backend times out.
+
+**File:** `src/hooks/useRealtimeChat.ts`
+
+| Constant | Current | New |
+|----------|---------|-----|
+| `SESSION_WARNING_TIME` | 120,000ms (2 min) | 70,000ms (1 min 10s) |
+| `PROACTIVE_RECONNECT_TIME` | 140,000ms (2 min 20s) | 90,000ms (1 min 30s) |
+
+### 2. Set Reconnecting Flag Earlier
+
+Currently `isReconnectingRef.current` is only set to `true` inside `performReconnect()`. If the backend dies before that function runs, the `proxy.openai_closed` handler sees it as `false` and tears everything down.
+
+The fix: set `isReconnectingRef.current = true` at the **warning time** (70s), so that if the backend dies between 70-90 seconds, the handler knows a reconnect is planned and won't reset the connection state.
+
+### 3. Guard Against Race in proxy.openai_closed
+
+Add an additional safety check: if a proactive reconnect timer is still pending (not null), treat the close as a planned event even if `isReconnectingRef.current` hasn't been set yet. This double-guards against the race condition.
+
+---
+
+## Expected Behavior After Fix
+
+```text
+0s     Connect
+70s    Warning: "Session refreshing soon" + set isReconnecting = true
+90s    Proactive reconnect fires (backend still alive at this point)
+       --> Old connection closed gracefully
+       --> New connection opened
+       --> Avatar stays visible throughout
+       --> isReconnecting reset to false
+90s+   New session starts, timer resets
+```
+
+The avatar will remain visible at all times because the reconnect happens while the backend is still alive, not after it dies.
+
+---
+
+## Technical Details
+
+### Files Modified
 
 | File | Change |
 |------|--------|
-| `src/hooks/useRealtimeChat.ts` | Update system prompt with new "brief first, then offer detail" instructions |
+| `src/hooks/useRealtimeChat.ts` | Reduce timeout constants, set reconnecting flag earlier, add race-condition guard |
 
----
+### No Edge Function Changes Needed
 
-## Expected Behavior After Changes
+The edge function itself is working correctly - it's the Supabase platform that enforces the timeout. The fix is entirely on the client side by reconnecting sooner.
 
-1. You ask a question → Get a quick, short answer
-2. AI asks if you want more detail
-3. You say "yes" or "explain" → Full whiteboard explanation appears
-4. You say nothing or move on → No whiteboard, continue with other questions
-
-This gives you complete control over the depth of each answer!
