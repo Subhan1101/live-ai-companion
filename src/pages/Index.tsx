@@ -5,7 +5,9 @@ import TranscriptPanel from "@/components/TranscriptPanel";
 import ControlBar from "@/components/ControlBar";
 import FileUpload from "@/components/FileUpload";
 import WhiteboardModal from "@/components/WhiteboardModal";
+import TeacherSelect from "@/components/TeacherSelect";
 import { type BSLSettingsState } from "@/components/BSLSettings";
+import { type Teacher } from "@/lib/teachers";
 
 import { useRealtimeChat } from "@/hooks/useRealtimeChat";
 import { useScreenShare } from "@/hooks/useScreenShare";
@@ -43,6 +45,7 @@ const Index = () => {
     captureScreenshot,
   } = useScreenShare();
 
+  const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isMicOn, setIsMicOn] = useState(true);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -71,11 +74,12 @@ const Index = () => {
     [closeWhiteboard]
   );
 
-  // Auto-connect on mount
+  // Auto-connect after teacher is selected
   useEffect(() => {
+    if (!selectedTeacher) return;
     connect();
     return () => disconnect();
-  }, []);
+  }, [selectedTeacher]);
 
   // Prompt user to click microphone after connection is established
   useEffect(() => {
@@ -352,6 +356,11 @@ const Index = () => {
     });
   }, [isConnected, sendTextContent]);
 
+  // Show teacher selection if no teacher chosen yet
+  if (!selectedTeacher) {
+    return <TeacherSelect onSelect={setSelectedTeacher} />;
+  }
+
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Main content area */}
@@ -360,6 +369,8 @@ const Index = () => {
           {/* Avatar Panel - Left */}
           <div className="h-full min-h-0 overflow-hidden lg:col-span-4">
             <AvatarPanel
+              faceId={selectedTeacher.faceId}
+              teacherName={selectedTeacher.name}
               status={status}
               isRecording={isRecording}
               onMicPress={handleMicPress}
