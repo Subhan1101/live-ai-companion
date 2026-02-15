@@ -3,11 +3,9 @@ import { Mic } from "lucide-react";
 import { SimliClient } from "simli-client";
 import { supabase } from "@/integrations/supabase/client";
 
-// Fixed avatar configuration
-const AVATAR_FACE_ID = "5fc23ea5-8175-4a82-aaaf-cdd8c88543dc";
-const AVATAR_NAME = "Aria";
-
 interface AvatarPanelProps {
+  faceId: string;
+  teacherName: string;
   status: "idle" | "listening" | "speaking" | "processing";
   isRecording: boolean;
   onMicPress: () => void;
@@ -41,6 +39,8 @@ const WaveformVisualizer = ({ audioLevel, isActive }: { audioLevel: number; isAc
 };
 
 export const AvatarPanel = ({
+  faceId,
+  teacherName,
   status,
   isRecording,
   onMicPress,
@@ -108,7 +108,7 @@ export const AvatarPanel = ({
           setIsSimliReady(false);
         }
         
-        console.log("Initializing Simli with face:", AVATAR_FACE_ID);
+        console.log("Initializing Simli with face:", faceId);
         
         // Fetch API key from backend function (using the client SDK avoids CORS/URL issues)
         const { data, error } = await supabase.functions.invoke("simli-token");
@@ -137,7 +137,7 @@ export const AvatarPanel = ({
         // Initialize with the correct face ID
         simliClient.Initialize({
           apiKey: apiKey,
-          faceID: AVATAR_FACE_ID,
+          faceID: faceId,
           handleSilence: true,
           maxSessionLength: 3600,
           maxIdleTime: 600,
@@ -162,7 +162,7 @@ export const AvatarPanel = ({
           return;
         }
         
-        console.log("Simli client started successfully with face:", AVATAR_FACE_ID);
+        console.log("Simli client started successfully with face:", faceId);
         setIsSimliReady(true);
         setSimliError(null);
 
@@ -259,7 +259,7 @@ export const AvatarPanel = ({
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/40 to-transparent">
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-2">
-            <h2 className="text-2xl font-display font-bold text-white drop-shadow-md">{AVATAR_NAME}</h2>
+            <h2 className="text-2xl font-display font-bold text-white drop-shadow-md">{teacherName}</h2>
             <div className={`status-badge ${isListening ? "status-listening" : status === "speaking" ? "status-speaking" : ""}`}>
               {getStatusText()}
               {(isListening || status === "speaking") && <WaveformVisualizer audioLevel={status === "speaking" ? 50 : audioLevel} isActive={isListening || status === "speaking"} />}
