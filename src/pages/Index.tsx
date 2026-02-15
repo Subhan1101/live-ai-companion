@@ -253,6 +253,7 @@ const Index = () => {
     if (isConnected) {
       disconnect();
       setRecordingTime(0);
+      setSelectedTeacher(null);
       toast({
         title: "Call ended",
         description: "You have ended the conversation.",
@@ -261,7 +262,7 @@ const Index = () => {
       connect();
       toast({
         title: "Calling...",
-        description: "Connecting to Aria.",
+        description: "Connecting to your teacher.",
       });
     }
   };
