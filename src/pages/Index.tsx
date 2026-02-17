@@ -191,8 +191,6 @@ const Index = () => {
           description: "Aria can now see your screen. Just ask about what's on screen!",
         });
         
-        // Note: Screenshots are sent on-demand when user asks about screen
-        // Not continuously, to avoid overwhelming the API
       } catch (error) {
         toast({
           title: "Screen sharing failed",
@@ -304,6 +302,34 @@ const Index = () => {
 
     setIsBSLLoading(false);
   }, [isBSLEnabled, sendBSLModeChange]);
+
+  // Auto-capture screen every 15 seconds while sharing
+  useEffect(() => {
+    if (!isSharing || !isConnected) return;
+
+    // Capture immediately when sharing starts
+    handleCaptureScreen();
+
+    const interval = window.setInterval(() => {
+      handleCaptureScreen();
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [isSharing, isConnected, handleCaptureScreen]);
+
+  // Global keyboard shortcut: Ctrl+Shift+S / Cmd+Shift+S for instant capture
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (isSharing) {
+          handleCaptureScreen();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isSharing, handleCaptureScreen]);
 
   // Update BSL response text continuously during streaming.
   // - When a NEW message ID appears, reset and start signing from beginning.
@@ -475,7 +501,7 @@ const Index = () => {
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50">
           <div className="px-4 py-2 bg-destructive/90 text-destructive-foreground rounded-full text-sm font-medium flex items-center gap-2 animate-pulse">
             <div className="w-2 h-2 rounded-full bg-white" />
-            Screen sharing active - Click "Capture" to send to Aria
+            Screen sharing active — auto-capturing every 15s (⌘/Ctrl+Shift+S for instant)
           </div>
         </div>
       )}

@@ -1,4 +1,5 @@
 import { Video, Mic, MonitorUp, Phone, PhoneOff, Circle, Camera, MonitorOff, Hand } from "lucide-react";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 
 interface ControlBarProps {
   isCameraOn: boolean;
@@ -85,14 +86,23 @@ export const ControlBar = ({
         {/* Capture screen button - only visible when sharing */}
         {isScreenSharing && (
           <div className="flex flex-col items-center">
-            <button 
-              onClick={onCaptureScreen} 
-              className="control-button control-button-active"
-              title="Send screenshot to Aria"
-            >
-              <Camera className="w-5 h-5" />
-            </button>
-            <span className="text-xs text-muted-foreground mt-1">Capture</span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button 
+                    onClick={onCaptureScreen} 
+                    className="control-button control-button-active"
+                  >
+                    <Camera className="w-5 h-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Auto-capturing every 15s</p>
+                  <p className="text-xs text-muted-foreground">⌘/Ctrl+Shift+S for instant capture</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <span className="text-xs text-muted-foreground mt-1">Auto ✓</span>
           </div>
         )}
 
