@@ -51,6 +51,7 @@ export const VideoPanel = ({
     toggleBSL,
     clearRecognizedText,
     sendRecognizedText,
+    retryLoad: bslRetryLoad,
   } = useBSLRecognition(videoRef, {
     confidenceThreshold: 0.6,
     detectionInterval: 100,
@@ -184,6 +185,7 @@ export const VideoPanel = ({
           onSend={handleBSLSend}
           onClear={clearRecognizedText}
           onClose={toggleBSL}
+          onRetry={bslRetryLoad}
         />
         
         {/* Placeholder when no video */}

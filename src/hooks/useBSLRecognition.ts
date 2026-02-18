@@ -39,27 +39,57 @@ export const useBSLRecognition = (
   const lastDetectionRef = useRef<number>(0);
   const isEnabledRef = useRef(false); // Track enabled state for frame loop
 
-  // Load MediaPipe Hands
+  // CDN sources for MediaPipe files (fallback chain)
+  const cdnSources = useRef([
+    'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/',
+    'https://unpkg.com/@mediapipe/hands@0.4.1675469240/',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/hands/',
+  ]);
+
+  // Try to initialize Hands with a specific CDN
+  const tryInitHands = useCallback(async (Hands: any, cdnBase: string): Promise<any> => {
+    const hands = new Hands({
+      locateFile: (file: string) => `${cdnBase}${file}`,
+    });
+
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+
+    // Test that the model actually loads by initializing it
+    await hands.initialize();
+    return hands;
+  }, []);
+
+  // Load MediaPipe Hands with fallback CDNs
   const loadMediaPipe = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Dynamically import MediaPipe
       const { Hands } = await import('@mediapipe/hands');
-      
-      const hands = new Hands({
-        locateFile: (file) => {
-          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-        }
-      });
 
-      hands.setOptions({
-        maxNumHands: 2,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-      });
+      let hands: any = null;
+      let lastErr: any = null;
+
+      for (const cdn of cdnSources.current) {
+        try {
+          console.log(`Trying MediaPipe CDN: ${cdn}`);
+          hands = await tryInitHands(Hands, cdn);
+          console.log(`MediaPipe loaded successfully from: ${cdn}`);
+          break;
+        } catch (err) {
+          console.warn(`CDN failed (${cdn}):`, err);
+          lastErr = err;
+        }
+      }
+
+      if (!hands) {
+        throw lastErr || new Error('All CDN sources failed');
+      }
 
       hands.onResults((results: any) => {
         processHandResults(results);
@@ -70,11 +100,11 @@ export const useBSLRecognition = (
       return hands;
     } catch (err) {
       console.error('Failed to load MediaPipe Hands:', err);
-      setError('Failed to load hand tracking. Please refresh and try again.');
+      setError('Failed to load hand tracking. Check your internet connection and try again.');
       setIsLoading(false);
       return null;
     }
-  }, []);
+  }, [tryInitHands]);
 
   // Process hand detection results
   const processHandResults = useCallback((results: any) => {
@@ -245,6 +275,15 @@ export const useBSLRecognition = (
     };
   }, [stopDetection]);
 
+  // Retry loading
+  const retryLoad = useCallback(() => {
+    handsRef.current = null;
+    setError(null);
+    if (isEnabled) {
+      startDetection();
+    }
+  }, [isEnabled, startDetection]);
+
   return {
     isEnabled,
     isLoading,
@@ -256,7 +295,8 @@ export const useBSLRecognition = (
     toggleBSL,
     clearRecognizedText,
     sendRecognizedText,
-    setIsEnabled
+    setIsEnabled,
+    retryLoad,
   };
 };
 

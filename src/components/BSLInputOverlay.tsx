@@ -14,6 +14,7 @@ interface BSLInputOverlayProps {
   onSend: (text: string) => void;
   onClear: () => void;
   onClose: () => void;
+  onRetry?: () => void;
 }
 
 export const BSLInputOverlay = ({
@@ -27,6 +28,7 @@ export const BSLInputOverlay = ({
   onSend,
   onClear,
   onClose,
+  onRetry,
 }: BSLInputOverlayProps) => {
   const [showHelp, setShowHelp] = useState(true);
 
@@ -77,8 +79,13 @@ export const BSLInputOverlay = ({
       {/* Error state */}
       {error && (
         <div className="absolute inset-x-2 top-12 pointer-events-auto">
-          <div className="bg-destructive/90 text-destructive-foreground rounded-lg px-3 py-2 text-sm">
-            {error}
+          <div className="bg-destructive/90 text-destructive-foreground rounded-lg px-3 py-2 text-sm flex items-center justify-between gap-2">
+            <span>{error}</span>
+            {onRetry && (
+              <Button variant="secondary" size="sm" onClick={onRetry} className="shrink-0 text-xs h-6">
+                Retry
+              </Button>
+            )}
           </div>
         </div>
       )}
