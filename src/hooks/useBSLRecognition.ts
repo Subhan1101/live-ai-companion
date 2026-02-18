@@ -39,75 +39,83 @@ export const useBSLRecognition = (
   const lastDetectionRef = useRef<number>(0);
   const isEnabledRef = useRef(false); // Track enabled state for frame loop
 
-  // CDN sources for MediaPipe files (fallback chain)
-  const cdnSources = useRef([
-    'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/',
-    'https://cdn.jsdelivr.net/npm/@mediapipe/hands/',
-    'https://unpkg.com/@mediapipe/hands@0.4.1675469240/',
-    'https://unpkg.com/@mediapipe/hands/',
+  // CDN sources for MediaPipe Hands script
+  const cdnScripts = useRef([
+    'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js',
+    'https://unpkg.com/@mediapipe/hands@0.4.1675469240/hands.js',
   ]);
 
-  // Try to initialize Hands with a specific CDN, with a timeout
-  const tryInitHands = useCallback(async (Hands: any, cdnBase: string): Promise<any> => {
-    const hands = new Hands({
-      locateFile: (file: string) => {
-        const url = `${cdnBase}${file}`;
-        console.log(`[BSL] Loading MediaPipe file: ${url}`);
-        return url;
-      },
+  // Load a script tag and return a promise
+  const loadScript = useCallback((src: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      // Check if already loaded
+      if (document.querySelector(`script[src="${src}"]`)) {
+        resolve();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = src;
+      script.crossOrigin = 'anonymous';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Script load error: ${src}`));
+      document.head.appendChild(script);
     });
-
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
-
-    // Wrap initialize in a timeout promise (30s)
-    if (hands.initialize) {
-      await Promise.race([
-        hands.initialize(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('MediaPipe init timeout after 30s')), 30000))
-      ]);
-    }
-    
-    return hands;
   }, []);
 
-  // Load MediaPipe Hands with fallback CDNs
+  // Load MediaPipe Hands via script tag (not import)
   const loadMediaPipe = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      console.log('[BSL] Importing @mediapipe/hands...');
-      const mpHands = await import('@mediapipe/hands');
-      // The package may export Hands as named export, default export, or on the module itself
-      const Hands = (mpHands as any).Hands || (mpHands as any).default?.Hands || (mpHands as any).default;
-      if (!Hands || typeof Hands !== 'function') {
-        console.error('[BSL] Available exports:', Object.keys(mpHands));
-        throw new Error('MediaPipe Hands constructor not found in module exports');
-      }
-      console.log('[BSL] Import successful, Hands constructor found');
-
-      let hands: any = null;
-      let lastErr: any = null;
-
-      for (const cdn of cdnSources.current) {
+      // Try each CDN until one works
+      let loaded = false;
+      let cdnBase = '';
+      for (const src of cdnScripts.current) {
         try {
-          console.log(`Trying MediaPipe CDN: ${cdn}`);
-          hands = await tryInitHands(Hands, cdn);
-          console.log(`MediaPipe loaded successfully from: ${cdn}`);
+          console.log(`[BSL] Loading script: ${src}`);
+          await loadScript(src);
+          cdnBase = src.replace(/hands\.js$/, '');
+          loaded = true;
+          console.log(`[BSL] Script loaded from: ${src}`);
           break;
         } catch (err: any) {
-          console.warn(`CDN failed (${cdn}):`, err?.message || err);
-          lastErr = err;
+          console.warn(`[BSL] CDN failed: ${src}`, err?.message);
         }
       }
 
-      if (!hands) {
-        throw lastErr || new Error('All CDN sources failed');
+      if (!loaded) {
+        throw new Error('All CDN sources failed to load MediaPipe script');
+      }
+
+      const Hands = (window as any).Hands;
+      if (!Hands || typeof Hands !== 'function') {
+        throw new Error('MediaPipe Hands constructor not found on window after script load');
+      }
+
+      console.log('[BSL] Hands constructor found on window, initializing...');
+
+      const hands = new Hands({
+        locateFile: (file: string) => {
+          const url = `${cdnBase}${file}`;
+          console.log(`[BSL] Loading MediaPipe file: ${url}`);
+          return url;
+        },
+      });
+
+      hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      // Initialize with timeout
+      if (hands.initialize) {
+        await Promise.race([
+          hands.initialize(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('MediaPipe init timeout after 30s')), 30000))
+        ]);
       }
 
       hands.onResults((results: any) => {
@@ -115,15 +123,16 @@ export const useBSLRecognition = (
       });
 
       handsRef.current = hands;
+      console.log('[BSL] MediaPipe Hands ready!');
       setIsLoading(false);
       return hands;
     } catch (err: any) {
-      console.error('Failed to load MediaPipe Hands:', err);
+      console.error('[BSL] Failed to load MediaPipe Hands:', err);
       setError(`Hand tracking failed to load: ${err?.message || 'Unknown error'}. Tap Retry.`);
       setIsLoading(false);
       return null;
     }
-  }, [tryInitHands]);
+  }, [loadScript]);
 
   // Process hand detection results
   const processHandResults = useCallback((results: any) => {
