@@ -42,12 +42,31 @@ export const useBSLRecognition = (
   // CDN sources for MediaPipe files (fallback chain)
   const cdnSources = useRef([
     'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/',
-    'https://unpkg.com/@mediapipe/hands@0.4.1675469240/',
     'https://cdn.jsdelivr.net/npm/@mediapipe/hands/',
+    'https://unpkg.com/@mediapipe/hands@0.4.1675469240/',
+    'https://unpkg.com/@mediapipe/hands/',
   ]);
 
-  // Try to initialize Hands with a specific CDN
+  // Try to initialize Hands with a specific CDN, with a timeout
   const tryInitHands = useCallback(async (Hands: any, cdnBase: string): Promise<any> => {
+    // First verify that the CDN is reachable by fetching a small file
+    const testUrl = `${cdnBase}hands.js`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    try {
+      const res = await fetch(testUrl, { 
+        method: 'HEAD', 
+        signal: controller.signal,
+        mode: 'cors'
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) throw new Error(`CDN returned ${res.status}`);
+    } catch (fetchErr) {
+      clearTimeout(timeoutId);
+      throw new Error(`CDN unreachable: ${fetchErr}`);
+    }
+
     const hands = new Hands({
       locateFile: (file: string) => `${cdnBase}${file}`,
     });
@@ -59,8 +78,13 @@ export const useBSLRecognition = (
       minTrackingConfidence: 0.5,
     });
 
-    // Test that the model actually loads by initializing it
-    await hands.initialize();
+    // Wrap initialize in a timeout promise
+    const initWithTimeout = Promise.race([
+      hands.initialize ? hands.initialize() : Promise.resolve(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Init timeout')), 30000))
+    ]);
+    
+    await initWithTimeout;
     return hands;
   }, []);
 
@@ -70,7 +94,9 @@ export const useBSLRecognition = (
     setError(null);
 
     try {
+      console.log('Importing @mediapipe/hands...');
       const { Hands } = await import('@mediapipe/hands');
+      console.log('Import successful, trying CDN sources...');
 
       let hands: any = null;
       let lastErr: any = null;
@@ -81,8 +107,8 @@ export const useBSLRecognition = (
           hands = await tryInitHands(Hands, cdn);
           console.log(`MediaPipe loaded successfully from: ${cdn}`);
           break;
-        } catch (err) {
-          console.warn(`CDN failed (${cdn}):`, err);
+        } catch (err: any) {
+          console.warn(`CDN failed (${cdn}):`, err?.message || err);
           lastErr = err;
         }
       }
@@ -98,9 +124,9 @@ export const useBSLRecognition = (
       handsRef.current = hands;
       setIsLoading(false);
       return hands;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load MediaPipe Hands:', err);
-      setError('Failed to load hand tracking. Check your internet connection and try again.');
+      setError(`Hand tracking failed to load: ${err?.message || 'Unknown error'}. Tap Retry.`);
       setIsLoading(false);
       return null;
     }
