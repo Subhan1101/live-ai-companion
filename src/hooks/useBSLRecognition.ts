@@ -49,26 +49,12 @@ export const useBSLRecognition = (
 
   // Try to initialize Hands with a specific CDN, with a timeout
   const tryInitHands = useCallback(async (Hands: any, cdnBase: string): Promise<any> => {
-    // First verify that the CDN is reachable by fetching a small file
-    const testUrl = `${cdnBase}hands.js`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-    
-    try {
-      const res = await fetch(testUrl, { 
-        method: 'HEAD', 
-        signal: controller.signal,
-        mode: 'cors'
-      });
-      clearTimeout(timeoutId);
-      if (!res.ok) throw new Error(`CDN returned ${res.status}`);
-    } catch (fetchErr) {
-      clearTimeout(timeoutId);
-      throw new Error(`CDN unreachable: ${fetchErr}`);
-    }
-
     const hands = new Hands({
-      locateFile: (file: string) => `${cdnBase}${file}`,
+      locateFile: (file: string) => {
+        const url = `${cdnBase}${file}`;
+        console.log(`[BSL] Loading MediaPipe file: ${url}`);
+        return url;
+      },
     });
 
     hands.setOptions({
@@ -78,13 +64,14 @@ export const useBSLRecognition = (
       minTrackingConfidence: 0.5,
     });
 
-    // Wrap initialize in a timeout promise
-    const initWithTimeout = Promise.race([
-      hands.initialize ? hands.initialize() : Promise.resolve(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Init timeout')), 30000))
-    ]);
+    // Wrap initialize in a timeout promise (30s)
+    if (hands.initialize) {
+      await Promise.race([
+        hands.initialize(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('MediaPipe init timeout after 30s')), 30000))
+      ]);
+    }
     
-    await initWithTimeout;
     return hands;
   }, []);
 
