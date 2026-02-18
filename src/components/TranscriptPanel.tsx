@@ -15,6 +15,7 @@ interface TranscriptPanelProps {
   messages: Message[];
   partialTranscript: string;
   isProcessing: boolean;
+  teacherName?: string;
   onUploadClick?: () => void;
   onShowWhiteboard?: (content: string) => void;
   onSendText?: (text: string) => void;
@@ -24,7 +25,7 @@ const formatTime = (date: Date) => {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
-export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onUploadClick, onShowWhiteboard, onSendText }: TranscriptPanelProps) => {
+export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, teacherName = "Aria", onUploadClick, onShowWhiteboard, onSendText }: TranscriptPanelProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [inputText, setInputText] = useState('');
 
@@ -42,7 +43,7 @@ export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onU
           🤖
         </div>
         <div>
-          <h3 className="font-display font-bold text-lg">Aria</h3>
+          <h3 className="font-display font-bold text-lg">{teacherName}</h3>
           <p className="text-sm text-muted-foreground">Tell me how you feel</p>
         </div>
       </div>
@@ -163,13 +164,13 @@ export const TranscriptPanel = ({ messages, partialTranscript, isProcessing, onU
                 setInputText('');
               }
             }}
-            placeholder="Type a message to Aria..."
+            placeholder={`Type a message to ${teacherName}...`}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
           <button 
             onClick={onUploadClick}
             className="p-2 text-muted-foreground hover:text-foreground transition-colors"
-            title="Upload a file for Aria to analyze"
+            title={`Upload a file for ${teacherName} to analyze`}
           >
             <Upload className="w-5 h-5" />
           </button>

@@ -242,12 +242,12 @@ export const AvatarPanel = ({
           <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-amber-400 to-orange-500">
             {simliError ? (
               <div className="text-center p-4">
-                <div className="text-6xl mb-4">🤖</div>
+                <div className="w-12 h-12 mx-auto mb-4 rounded-full border-4 border-white/30 border-t-white animate-spin" />
                 <p className="text-white/80 text-sm">{simliError}</p>
               </div>
             ) : (
               <div className="text-center">
-                <div className="text-6xl mb-4 animate-pulse">👩‍🏫</div>
+                <div className="w-12 h-12 mx-auto mb-4 rounded-full border-4 border-white/30 border-t-white animate-spin" />
                 <p className="text-white/80 text-sm">Teacher is coming...</p>
               </div>
             )}

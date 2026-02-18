@@ -444,6 +444,7 @@ const Index = () => {
               messages={messages}
               partialTranscript={partialTranscript}
               isProcessing={isProcessing}
+              teacherName={selectedTeacher?.name}
               onUploadClick={() => setShowFileUpload(true)}
               onShowWhiteboard={openWhiteboard}
               onSendText={handleSendText}
