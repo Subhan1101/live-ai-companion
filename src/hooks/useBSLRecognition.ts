@@ -81,9 +81,15 @@ export const useBSLRecognition = (
     setError(null);
 
     try {
-      console.log('Importing @mediapipe/hands...');
-      const { Hands } = await import('@mediapipe/hands');
-      console.log('Import successful, trying CDN sources...');
+      console.log('[BSL] Importing @mediapipe/hands...');
+      const mpHands = await import('@mediapipe/hands');
+      // The package may export Hands as named export, default export, or on the module itself
+      const Hands = (mpHands as any).Hands || (mpHands as any).default?.Hands || (mpHands as any).default;
+      if (!Hands || typeof Hands !== 'function') {
+        console.error('[BSL] Available exports:', Object.keys(mpHands));
+        throw new Error('MediaPipe Hands constructor not found in module exports');
+      }
+      console.log('[BSL] Import successful, Hands constructor found');
 
       let hands: any = null;
       let lastErr: any = null;
