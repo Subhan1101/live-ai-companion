@@ -1,24 +1,54 @@
 
 
-## Two Fixes
+## Fix BSL Hand Tracking - Final Solution
 
-### 1. Remove emoji from AvatarPanel loading state
-The loading overlay in `AvatarPanel.tsx` shows a "teacher" emoji and an error "robot" emoji. Both will be removed -- replaced with a simple loading spinner or just the text.
+### Root Cause
+The `@mediapipe/hands` npm package is not a proper ES module. It's designed to be loaded as a global script via `<script>` tag. Every attempt to `import()` it through Vite fails because the bundler can't resolve the `Hands` constructor properly, producing "constructor not found" or "z is not a constructor" errors.
 
-**File: `src/components/AvatarPanel.tsx`**
-- Line 245: Remove the `<div className="text-6xl mb-4">🤖</div>` (error state emoji)
-- Line 250: Remove the `<div className="text-6xl mb-4 animate-pulse">👩‍🏫</div>` (loading state emoji)
-- Replace both with a simple spinning circle animation
+### Solution: Load MediaPipe via Script Tag
 
-### 2. Show selected teacher's name instead of "Aria" in TranscriptPanel
-The chat panel header always says "Aria" regardless of which teacher is selected. It needs to show the actual teacher's name (Lina, Zahra, Hank, Mark, or Kate).
+Instead of using `import('@mediapipe/hands')`, load the library by injecting a `<script>` tag that puts `window.Hands` on the global scope, which is how Google designed MediaPipe to work.
 
-**File: `src/components/TranscriptPanel.tsx`**
-- Add a `teacherName` prop (string, optional with default "Aria" for backward compatibility)
-- Line 45: Replace hardcoded "Aria" with `{teacherName}`
-- Line 166: Replace `"Type a message to Aria..."` with `"Type a message to {teacherName}..."`
-- Line 172: Replace `"Upload a file for Aria to analyze"` with `"Upload a file for {teacherName} to analyze"`
+### Changes
 
-**File: `src/pages/Index.tsx`**
-- Pass `teacherName={selectedTeacher.name}` to the `TranscriptPanel` component
+**File: `src/hooks/useBSLRecognition.ts`**
+
+Replace the `loadMediaPipe` function:
+
+1. Remove the `import('@mediapipe/hands')` dynamic import entirely
+2. Add a helper function `loadScript(src)` that creates a `<script>` tag, appends it to `document.head`, and returns a Promise that resolves on `load` and rejects on `error`
+3. In `loadMediaPipe`, load the script from the first working CDN:
+   - `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js`
+   - `https://unpkg.com/@mediapipe/hands@0.4.1675469240/hands.js`
+4. After script loads, get `Hands` from `window.Hands` (the global the script defines)
+5. Create the `Hands` instance using `locateFile` pointing to the same CDN base
+6. Initialize with a 30-second timeout, then set up the `onResults` callback
+
+**File: `vite.config.ts`**
+
+Add `dedupe` for React packages to prevent duplicate instance issues:
+
+```
+resolve: {
+  alias: { "@": path.resolve(__dirname, "./src") },
+  dedupe: ["react", "react-dom"],
+},
+```
+
+### Technical Details
+
+The key change in pseudocode:
+
+```text
+OLD (broken):
+  const mpHands = await import('@mediapipe/hands')  // fails - not a real ESM module
+  const Hands = mpHands.Hands                        // undefined
+
+NEW (correct):
+  await loadScript('https://cdn.jsdelivr.net/.../hands.js')  // adds window.Hands
+  const Hands = (window as any).Hands                         // works - this is how MediaPipe is designed
+  const hands = new Hands({ locateFile: ... })                // success
+```
+
+This approach matches Google's own MediaPipe documentation and will work reliably across all browsers.
 
