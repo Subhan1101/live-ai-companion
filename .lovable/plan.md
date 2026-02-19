@@ -1,54 +1,75 @@
 
 
-## Fix BSL Hand Tracking - Final Solution
+## Problem: Why All Avatars Sound the Same
 
 ### Root Cause
-The `@mediapipe/hands` npm package is not a proper ES module. It's designed to be loaded as a global script via `<script>` tag. Every attempt to `import()` it through Vite fails because the bundler can't resolve the `Hands` constructor properly, producing "constructor not found" or "z is not a constructor" errors.
 
-### Solution: Load MediaPipe via Script Tag
+Your app currently uses this audio pipeline:
 
-Instead of using `import('@mediapipe/hands')`, load the library by injecting a `<script>` tag that puts `window.Hands` on the global scope, which is how Google designed MediaPipe to work.
+1. User speaks -> **OpenAI Realtime API** transcribes speech (Whisper)
+2. OpenAI generates a text response using a **hardcoded "EduGuide" system prompt** (same for all 5 teachers)
+3. OpenAI generates audio using a **hardcoded voice called "shimmer"** (same for all 5 teachers)
+4. That audio is sent to **Simli purely for lip-sync** -- Simli only moves the avatar's mouth to match the audio
 
-### Changes
+Simli is NOT being used as a conversational AI here. It is only receiving audio and animating the face. The voices and system prompts you trained inside Simli's platform are never used because the app bypasses Simli's conversation engine entirely.
 
-**File: `src/hooks/useBSLRecognition.ts`**
+### The Fix
 
-Replace the `loadMediaPipe` function:
+There are two possible approaches:
 
-1. Remove the `import('@mediapipe/hands')` dynamic import entirely
-2. Add a helper function `loadScript(src)` that creates a `<script>` tag, appends it to `document.head`, and returns a Promise that resolves on `load` and rejects on `error`
-3. In `loadMediaPipe`, load the script from the first working CDN:
-   - `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js`
-   - `https://unpkg.com/@mediapipe/hands@0.4.1675469240/hands.js`
-4. After script loads, get `Hands` from `window.Hands` (the global the script defines)
-5. Create the `Hands` instance using `locateFile` pointing to the same CDN base
-6. Initialize with a 30-second timeout, then set up the `onResults` callback
+#### Option A: Use Simli's Built-in Conversational AI (Recommended)
 
-**File: `vite.config.ts`**
+Instead of routing everything through OpenAI Realtime + piping audio to Simli for lip-sync, use Simli's own conversation API which already has your trained voices and prompts.
 
-Add `dedupe` for React packages to prevent duplicate instance issues:
+This means:
+- Remove the OpenAI Realtime WebSocket connection for voice
+- Use Simli's conversational AI endpoint instead (the avatars will use their trained voices and system prompts automatically)
+- Simli handles STT, LLM response, TTS, and lip-sync all in one
 
-```
-resolve: {
-  alias: { "@": path.resolve(__dirname, "./src") },
-  dedupe: ["react", "react-dom"],
-},
-```
+**Pros**: Uses the exact voices and prompts you trained. Simpler architecture.
+**Cons**: Depends on what Simli's conversation API supports (may need to verify features like whiteboard, image input, etc.)
 
-### Technical Details
+#### Option B: Keep OpenAI Realtime but Use Per-Teacher Voice and Prompt
 
-The key change in pseudocode:
+Keep the current architecture (OpenAI for conversation, Simli for lip-sync only) but make the voice and system prompt dynamic per teacher.
 
-```text
-OLD (broken):
-  const mpHands = await import('@mediapipe/hands')  // fails - not a real ESM module
-  const Hands = mpHands.Hands                        // undefined
+Changes needed:
 
-NEW (correct):
-  await loadScript('https://cdn.jsdelivr.net/.../hands.js')  // adds window.Hands
-  const Hands = (window as any).Hands                         // works - this is how MediaPipe is designed
-  const hands = new Hands({ locateFile: ... })                // success
-```
+1. **`src/lib/teachers.ts`** -- Add `voice` and `systemPrompt` fields to each teacher:
+   - Lina: voice "shimmer", her custom prompt
+   - Zahra: voice "nova", her custom prompt
+   - Hank: voice "echo", his custom prompt
+   - Mark: voice "onyx", his custom prompt
+   - Kate: voice "alloy", her custom prompt
 
-This approach matches Google's own MediaPipe documentation and will work reliably across all browsers.
+2. **`src/hooks/useRealtimeChat.ts`** -- Accept a `teacher` parameter:
+   - Change `connect()` to accept the selected teacher
+   - In the `session.update` message (line ~409-568), use `teacher.voice` instead of hardcoded `"shimmer"`
+   - Use `teacher.systemPrompt` instead of the hardcoded EduGuide prompt
+
+3. **`src/pages/Index.tsx`** -- Pass the selected teacher to the chat hook
+
+**Pros**: Keeps existing features (whiteboard, image upload, BSL). Full control over voices and prompts.
+**Cons**: Uses OpenAI's voices (not the exact ones from Simli training). You would need to replicate your Simli-trained prompts into the teacher definitions.
+
+### Recommendation
+
+**Option A** is recommended if Simli's conversational AI supports all the features you need (whiteboard detection, image processing, etc.) -- since it will use the exact voices and prompts you already trained.
+
+**Option B** is the safer fallback if you need to keep OpenAI features but want different voices per teacher. The voices will be OpenAI's built-in voices (shimmer, nova, echo, onyx, alloy, etc.), not the Simli-trained ones.
+
+### Technical Details (Option B Implementation)
+
+**File: `src/lib/teachers.ts`**
+- Add `openaiVoice` field (one of: "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
+- Add `systemPrompt` field with each teacher's unique personality and subject expertise
+
+**File: `src/hooks/useRealtimeChat.ts`**
+- Change the hook signature to accept a `Teacher` object or at minimum `voice` and `instructions` parameters
+- Replace hardcoded `voice: "shimmer"` (line 551) with the teacher's voice
+- Replace hardcoded instructions string (lines 414-550) with the teacher's system prompt
+- Store the teacher reference so reconnects use the same config
+
+**File: `src/pages/Index.tsx`**
+- Pass `selectedTeacher` to `useRealtimeChat()` or to `connect()`
 
