@@ -11,6 +11,7 @@ interface VideoPanelProps {
   isSpeaking: boolean;
   isMuted: boolean;
   isCameraOn?: boolean;
+  teacherName?: string;
   onBSLInput?: (text: string) => void;
   // BSL display props
   isBSLEnabled?: boolean;
@@ -25,6 +26,7 @@ export const VideoPanel = ({
   isSpeaking, 
   isMuted, 
   isCameraOn = true, 
+  teacherName,
   onBSLInput,
   isBSLEnabled = false,
   bslText = '',
@@ -182,6 +184,7 @@ export const VideoPanel = ({
           confidence={confidence}
           recognizedText={recognizedText}
           error={bslError}
+          teacherName={teacherName}
           onSend={handleBSLSend}
           onClear={clearRecognizedText}
           onClose={toggleBSL}

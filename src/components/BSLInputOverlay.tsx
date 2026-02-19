@@ -11,6 +11,7 @@ interface BSLInputOverlayProps {
   confidence: number;
   recognizedText: string;
   error: string | null;
+  teacherName?: string;
   onSend: (text: string) => void;
   onClear: () => void;
   onClose: () => void;
@@ -25,6 +26,7 @@ export const BSLInputOverlay = ({
   confidence,
   recognizedText,
   error,
+  teacherName = 'Teacher',
   onSend,
   onClear,
   onClose,
@@ -157,7 +159,7 @@ export const BSLInputOverlay = ({
               disabled={!recognizedText.trim()}
             >
               <Send className="w-4 h-4 mr-1" />
-              Send to Aria
+              Send to {teacherName}
             </Button>
           </div>
         </div>
