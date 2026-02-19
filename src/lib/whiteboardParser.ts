@@ -69,7 +69,9 @@ export function hasWhiteboardContent(text: string): boolean {
   const hasNumberedList = /^\d+\.\s+\*\*/m.test(text);
   const hasHeaders = /^###?\s+(Problem|Solution|Answer|Overview|Key Points|Tips|Strategy|Summary)/im.test(text);
   
-  return (hasMath && hasSteps) || hasKeyPoints || (hasNumberedList && hasHeaders);
+  // Relaxed detection: headers combined with any of math/steps/numbered lists
+  const hasStructuredContent = hasHeaders && (hasMath || hasSteps || hasNumberedList);
+  return (hasMath && hasSteps) || hasKeyPoints || (hasNumberedList && hasHeaders) || hasStructuredContent;
 }
 
 /**
