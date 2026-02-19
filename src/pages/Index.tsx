@@ -431,6 +431,7 @@ const Index = () => {
               isMuted={!isMicOn}
               isCameraOn={isCameraOn}
               onBSLInput={handleBSLInput}
+              teacherName={selectedTeacher.name}
               isBSLEnabled={isBSLEnabled}
               bslText={bslResponseText}
               bslSettings={bslSettings}
