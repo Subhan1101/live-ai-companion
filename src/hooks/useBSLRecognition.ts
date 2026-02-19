@@ -48,15 +48,33 @@ export const useBSLRecognition = (
   // Load a script tag and return a promise
   const loadScript = useCallback((src: string): Promise<void> => {
     return new Promise((resolve, reject) => {
-      // Check if already loaded (both script tag AND global constructor)
-      if (document.querySelector(`script[src="${src}"]`) && (window as any).Hands) {
+      const existingScript = document.querySelector(`script[src="${src}"]`);
+      // If script tag exists AND global is available, we're good
+      if (existingScript && (window as any).Hands) {
         resolve();
         return;
+      }
+      // Remove stale script tag that didn't produce the global
+      if (existingScript) {
+        console.log('[BSL] Removing stale script tag:', src);
+        existingScript.remove();
       }
       const script = document.createElement('script');
       script.src = src;
       script.crossOrigin = 'anonymous';
-      script.onload = () => resolve();
+      script.onload = () => {
+        // Verify global was actually created (some browsers delay assignment)
+        const checkGlobal = (attempts = 0) => {
+          if ((window as any).Hands) {
+            resolve();
+          } else if (attempts < 10) {
+            setTimeout(() => checkGlobal(attempts + 1), 100);
+          } else {
+            reject(new Error('Hands constructor not available after script load'));
+          }
+        };
+        checkGlobal();
+      };
       script.onerror = () => reject(new Error(`Script load error: ${src}`));
       document.head.appendChild(script);
     });

@@ -203,6 +203,11 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
     }
   }, []);
 
+  // Refs to break circular stale closure chain between scheduleProactiveReconnect <-> performReconnect <-> connectInternal <-> startAutoListening
+  const connectInternalRef = useRef<(() => Promise<void>) | null>(null);
+  const performReconnectRef = useRef<(() => Promise<void>) | null>(null);
+  const startAutoListeningRef = useRef<(() => Promise<void>) | null>(null);
+
   // Schedule proactive reconnection to prevent timeout
   const scheduleProactiveReconnect = useCallback(() => {
     connectionStartTimeRef.current = Date.now();
@@ -210,25 +215,25 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
     // Clear any existing timers
     clearReconnectTimers();
     
-    // Warning at 70s - also set reconnecting flag early to guard against race condition
+    // Warning at 85s - also set reconnecting flag early to guard against race condition
     warningTimeoutRef.current = window.setTimeout(() => {
-      console.log("Session warning: will refresh in 20 seconds, setting isReconnecting flag");
+      console.log("Session warning: will refresh in 25 seconds, setting isReconnecting flag");
       isReconnectingRef.current = true;
       setIsReconnecting(true);
       toast({
         title: "Session refreshing soon",
-        description: "Connection will seamlessly refresh in 20 seconds.",
+        description: "Connection will seamlessly refresh in 25 seconds.",
       });
     }, SESSION_WARNING_TIME);
     
-    // Proactive reconnect at 2:20
+    // Proactive reconnect at 110s
     proactiveReconnectTimeoutRef.current = window.setTimeout(() => {
       console.log("Proactive reconnection triggered");
-      performReconnect();
+      performReconnectRef.current?.();
     }, PROACTIVE_RECONNECT_TIME);
     
     console.log("Proactive reconnect scheduled for", PROACTIVE_RECONNECT_TIME / 1000, "seconds");
-  }, []);
+  }, [clearReconnectTimers]);
 
   // Internal reconnect function
   const performReconnect = useCallback(async () => {
@@ -281,17 +286,17 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
     // Brief delay before reconnecting
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Reconnect
+    // Reconnect using ref to get latest connectInternal
     try {
-      await connectInternal();
+      await connectInternalRef.current?.();
       setIsReconnecting(false);
       isReconnectingRef.current = false;
       reconnectAttemptsRef.current = 0;
       
-      // Restart mic if it was active before reconnect
+      // Restart mic if it was active before reconnect - use ref for latest version
       if (wasListening) {
         console.log("Restarting microphone after reconnect...");
-        startAutoListening();
+        startAutoListeningRef.current?.();
       }
 
       toast({
@@ -305,9 +310,9 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
       const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptsRef.current), 8000);
       console.log("Retrying in", delay, "ms");
       
-      setTimeout(() => performReconnect(), delay);
+      setTimeout(() => performReconnectRef.current?.(), delay);
     }
-  }, []);
+  }, [clearReconnectTimers]);
 
   // Core connection logic (extracted for reuse)
   const connectInternal = useCallback(async () => {
@@ -407,7 +412,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                   
                   // Auto-reconnect if not a manual disconnect
                   if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-                    performReconnect();
+                    performReconnectRef.current?.();
                   }
                 } else {
                   console.log("Ignoring proxy.openai_closed during proactive reconnect");
@@ -699,18 +704,16 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                     console.log("[Whiteboard] Detection:", { hasWhiteboard, contentLength: lastAssistant.content.length, contentPreview: lastAssistant.content.substring(0, 200) });
                     // Clean up the chat message by removing whiteboard markers
                     const cleanedContent = removeWhiteboardMarkers(lastAssistant.content);
-                    // Always set originalContent so the whiteboard button can detect markers
-                    if (cleanedContent !== lastAssistant.content || hasWhiteboard) {
-                      return prev.map((m) =>
-                        m.id === lastAssistant.id 
-                          ? { 
-                              ...m, 
-                              originalContent: lastAssistant.content, // Keep original for whiteboard button detection
-                              content: cleanedContent || (hasWhiteboard ? "I've prepared a detailed explanation. Click 'Whiteboard' to view." : lastAssistant.content)
-                            } 
-                          : m
-                      );
-                    }
+                    // ALWAYS set originalContent so the whiteboard button can detect markers in any case
+                    return prev.map((m) =>
+                      m.id === lastAssistant.id 
+                        ? { 
+                            ...m, 
+                            originalContent: lastAssistant.content, // Always keep original for whiteboard button detection
+                            content: cleanedContent || (hasWhiteboard ? "I've prepared a detailed explanation. Click 'Whiteboard' to view." : lastAssistant.content)
+                          } 
+                        : m
+                    );
                   }
                   return prev;
                 });
@@ -772,7 +775,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
             if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
               const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptsRef.current), 8000);
               console.log("WebSocket closed unexpectedly, reconnecting in", delay, "ms");
-              setTimeout(() => performReconnect(), delay);
+              setTimeout(() => performReconnectRef.current?.(), delay);
             }
           } else {
             console.log("WebSocket closed during proactive reconnect - keeping avatar alive");
@@ -889,6 +892,11 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
       setStatus("idle");
     }
   }, []);
+
+  // Keep refs in sync so reconnect logic always uses latest versions
+  useEffect(() => { connectInternalRef.current = connectInternal; }, [connectInternal]);
+  useEffect(() => { performReconnectRef.current = performReconnect; }, [performReconnect]);
+  useEffect(() => { startAutoListeningRef.current = startAutoListening; }, [startAutoListening]);
 
   const startRecording = useCallback(async () => {
     // With auto-listen mode, this is already handled
