@@ -48,8 +48,8 @@ export const useBSLRecognition = (
   // Load a script tag and return a promise
   const loadScript = useCallback((src: string): Promise<void> => {
     return new Promise((resolve, reject) => {
-      // Check if already loaded
-      if (document.querySelector(`script[src="${src}"]`)) {
+      // Check if already loaded (both script tag AND global constructor)
+      if (document.querySelector(`script[src="${src}"]`) && (window as any).Hands) {
         resolve();
         return;
       }
