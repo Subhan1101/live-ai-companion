@@ -14,6 +14,8 @@ import { useScreenShare } from "@/hooks/useScreenShare";
 import { toast } from "@/hooks/use-toast";
 
 const Index = () => {
+  const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
+
   const {
     messages,
     partialTranscript,
@@ -36,7 +38,7 @@ const Index = () => {
     showWhiteboard,
     openWhiteboard,
     closeWhiteboard,
-  } = useRealtimeChat();
+  } = useRealtimeChat(selectedTeacher?.openaiVoice, selectedTeacher?.systemPrompt);
 
   const {
     isSharing,
@@ -45,7 +47,7 @@ const Index = () => {
     captureScreenshot,
   } = useScreenShare();
 
-  const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
+  // selectedTeacher state is declared above (before useRealtimeChat)
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isMicOn, setIsMicOn] = useState(true);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -86,7 +88,7 @@ const Index = () => {
     if (isConnected && !isRecording) {
       toast({
         title: "Connected!",
-        description: "Click the microphone button to start talking to Aria.",
+        description: `Click the microphone button to start talking to ${selectedTeacher?.name || 'your teacher'}.`,
       });
     }
   }, [isConnected]);
