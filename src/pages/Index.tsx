@@ -47,7 +47,6 @@ const Index = () => {
     captureScreenshot,
   } = useScreenShare();
 
-  // selectedTeacher state is declared above (before useRealtimeChat)
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isMicOn, setIsMicOn] = useState(true);
   const [recordingTime, setRecordingTime] = useState(0);

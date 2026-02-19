@@ -50,8 +50,8 @@ interface UseRealtimeChatReturn {
 const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
 
 // Auto-reconnect constants
-const SESSION_WARNING_TIME = 70000; // 1 min 10s - warn user & set reconnecting flag
-const PROACTIVE_RECONNECT_TIME = 90000; // 1 min 30s - reconnect before backend timeout (~120s)
+const SESSION_WARNING_TIME = 85000; // 1 min 25s - warn user
+const PROACTIVE_RECONNECT_TIME = 110000; // 1 min 50s - reconnect before backend timeout (~120s)
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY = 1000; // 1 second base delay for exponential backoff
 
@@ -88,6 +88,10 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
   // PCM16 resampler for Simli (24kHz -> 16kHz)
   const resamplerRef = useRef<PCM16Resampler>(new PCM16Resampler(24000, 16000));
 
+  // Refs to avoid stale closures in connectInternal/performReconnect
+  const teacherVoiceRef = useRef(teacherVoice);
+  const teacherInstructionsRef = useRef(teacherInstructions);
+
   // Whiteboard repair: sometimes the model emits placeholder tokens like "$1" instead of real formulas.
   const pendingWhiteboardRepairRef = useRef(false);
 
@@ -98,6 +102,10 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
   const connectionStartTimeRef = useRef<number | null>(null);
   const proactiveReconnectTimeoutRef = useRef<number | null>(null);
   const warningTimeoutRef = useRef<number | null>(null);
+
+  // Keep refs in sync with props
+  useEffect(() => { teacherVoiceRef.current = teacherVoice; }, [teacherVoice]);
+  useEffect(() => { teacherInstructionsRef.current = teacherInstructions; }, [teacherInstructions]);
 
   const countPlaceholderTokens = useCallback((text: string) => {
     // Match standalone "$<digit>" but avoid currency like $10 or $1.50
@@ -280,6 +288,12 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
       isReconnectingRef.current = false;
       reconnectAttemptsRef.current = 0;
       
+      // Restart mic if it was active before reconnect
+      if (wasListening) {
+        console.log("Restarting microphone after reconnect...");
+        startAutoListening();
+      }
+
       toast({
         title: "Connected",
         description: "Session refreshed successfully.",
@@ -411,8 +425,8 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                     type: "session.update",
                     session: {
                       modalities: ["text", "audio"],
-                      instructions: teacherInstructions || "You are EduGuide, a helpful AI teacher. Answer educational questions clearly and concisely.",
-                      voice: (teacherVoice || "shimmer") as any,
+                    instructions: teacherInstructionsRef.current || "You are EduGuide, a helpful AI teacher. Answer educational questions clearly and concisely.",
+                      voice: (teacherVoiceRef.current || "shimmer") as any,
                       input_audio_format: "pcm16",
                       output_audio_format: "pcm16",
                       input_audio_transcription: {
@@ -681,10 +695,12 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 setMessages((prev) => {
                   const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
                   if (lastAssistant) {
-                    const { hasWhiteboard } = extractWhiteboardContent(lastAssistant.content);
+                    const { hasWhiteboard, content: wbContent } = extractWhiteboardContent(lastAssistant.content);
+                    console.log("[Whiteboard] Detection:", { hasWhiteboard, contentLength: lastAssistant.content.length, contentPreview: lastAssistant.content.substring(0, 200) });
                     // Clean up the chat message by removing whiteboard markers
                     const cleanedContent = removeWhiteboardMarkers(lastAssistant.content);
-                    if (cleanedContent !== lastAssistant.content) {
+                    // Always set originalContent so the whiteboard button can detect markers
+                    if (cleanedContent !== lastAssistant.content || hasWhiteboard) {
                       return prev.map((m) =>
                         m.id === lastAssistant.id 
                           ? { 
