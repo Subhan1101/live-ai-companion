@@ -1,75 +1,72 @@
 
 
-## Problem: Why All Avatars Sound the Same
+## Fix Plan: Connection Stability, Whiteboard Popup, and BSL Issues
 
-### Root Cause
+### Issue 1: Connection Lost After ~1.5 Minutes
 
-Your app currently uses this audio pipeline:
+**Root Cause**: The proactive reconnect timer is set to 90 seconds (`PROACTIVE_RECONNECT_TIME = 90000`), and the `connectInternal` function has a **stale closure bug**. It's defined with `useCallback` but its dependency array only includes `[scheduleProactiveReconnect]` -- it does NOT include `teacherVoice` or `teacherInstructions`. This means:
 
-1. User speaks -> **OpenAI Realtime API** transcribes speech (Whisper)
-2. OpenAI generates a text response using a **hardcoded "EduGuide" system prompt** (same for all 5 teachers)
-3. OpenAI generates audio using a **hardcoded voice called "shimmer"** (same for all 5 teachers)
-4. That audio is sent to **Simli purely for lip-sync** -- Simli only moves the avatar's mouth to match the audio
+1. When the 90-second proactive reconnect fires, it calls `connectInternal()` which creates a new WebSocket
+2. The new session sends `session.update` with potentially stale/undefined voice and instructions values
+3. During reconnect, the microphone recorder is destroyed but may not be properly restarted
+4. The reconnect can fail silently, leaving the user disconnected
 
-Simli is NOT being used as a conversational AI here. It is only receiving audio and animating the face. The voices and system prompts you trained inside Simli's platform are never used because the app bypasses Simli's conversation engine entirely.
+**Fix**:
+- Add `teacherVoice` and `teacherInstructions` to the `connectInternal` dependency array (and cascading refs for `performReconnect`)
+- Better approach: store `teacherVoice` and `teacherInstructions` in refs so the reconnect closure always has the latest values
+- After successful reconnect, automatically restart the microphone recording if it was active before
+- Increase `PROACTIVE_RECONNECT_TIME` slightly (e.g., 110 seconds) to give more usable time per session while still staying under the ~120s backend limit
 
-### The Fix
+### Issue 2: Duplicate Variable Declaration (Build Error)
 
-There are two possible approaches:
+**Root Cause**: Console shows `SyntaxError: Identifier 'selectedTeacher' has already been declared` in `Index.tsx`. Line 50 has a comment `// selectedTeacher state is declared above (before useRealtimeChat)` which suggests there was previously a duplicate declaration that may have been left behind. This needs to be verified and the duplicate removed if present. This error prevents the page from hot-reloading properly.
 
-#### Option A: Use Simli's Built-in Conversational AI (Recommended)
+**Fix**:
+- Remove line 50 (the stale comment about `selectedTeacher`) -- the actual state is on line 17
+- Verify no duplicate `const selectedTeacher` exists
 
-Instead of routing everything through OpenAI Realtime + piping audio to Simli for lip-sync, use Simli's own conversation API which already has your trained voices and prompts.
+### Issue 3: Whiteboard Popup Not Working
 
-This means:
-- Remove the OpenAI Realtime WebSocket connection for voice
-- Use Simli's conversational AI endpoint instead (the avatars will use their trained voices and system prompts automatically)
-- Simli handles STT, LLM response, TTS, and lip-sync all in one
+**Root Cause**: The whiteboard button only appears when `hasWhiteboardContent(raw)` returns `true`, which requires the AI response to contain specific markers like `[WHITEBOARD_START]`, math expressions (`$$`), or step patterns. Two problems:
 
-**Pros**: Uses the exact voices and prompts you trained. Simpler architecture.
-**Cons**: Depends on what Simli's conversation API supports (may need to verify features like whiteboard, image input, etc.)
+1. The `originalContent` field (which preserves whiteboard markers before they're stripped) is only set in the `response.audio_transcript.done` handler. If the response doesn't trigger that exact event flow, `originalContent` may never be set.
+2. The AI system prompt instructs whiteboard usage, but after the per-teacher prompt change, the new teacher prompts may not include the whiteboard formatting instructions consistently.
 
-#### Option B: Keep OpenAI Realtime but Use Per-Teacher Voice and Prompt
+**Fix**:
+- Ensure all teacher system prompts include clear whiteboard formatting instructions (the shared teaching framework already has this, but verify it's being used)
+- Add a fallback: also check the `content` field (not just `originalContent`) for whiteboard markers when the button visibility is determined -- this is already done (`message.originalContent ?? message.content`), so the issue is more likely that the AI is not generating whiteboard-formatted responses
+- Add logging to debug whiteboard detection during streaming
 
-Keep the current architecture (OpenAI for conversation, Simli for lip-sync only) but make the voice and system prompt dynamic per teacher.
+### Issue 4: BSL Intermittent Failures
 
-Changes needed:
+**Root Cause**: The BSL script loading uses `document.querySelector` to check if the script is already loaded. If the script tag exists but the global `window.Hands` is not yet defined (race condition), or if the script was removed during a hot-reload, the detection silently fails.
 
-1. **`src/lib/teachers.ts`** -- Add `voice` and `systemPrompt` fields to each teacher:
-   - Lina: voice "shimmer", her custom prompt
-   - Zahra: voice "nova", her custom prompt
-   - Hank: voice "echo", his custom prompt
-   - Mark: voice "onyx", his custom prompt
-   - Kate: voice "alloy", her custom prompt
+**Fix**:
+- Change the "already loaded" check to also verify `window.Hands` exists, not just the script tag
+- Add a retry mechanism if `window.Hands` is undefined even after the script tag is found
 
-2. **`src/hooks/useRealtimeChat.ts`** -- Accept a `teacher` parameter:
-   - Change `connect()` to accept the selected teacher
-   - In the `session.update` message (line ~409-568), use `teacher.voice` instead of hardcoded `"shimmer"`
-   - Use `teacher.systemPrompt` instead of the hardcoded EduGuide prompt
+---
 
-3. **`src/pages/Index.tsx`** -- Pass the selected teacher to the chat hook
-
-**Pros**: Keeps existing features (whiteboard, image upload, BSL). Full control over voices and prompts.
-**Cons**: Uses OpenAI's voices (not the exact ones from Simli training). You would need to replicate your Simli-trained prompts into the teacher definitions.
-
-### Recommendation
-
-**Option A** is recommended if Simli's conversational AI supports all the features you need (whiteboard detection, image processing, etc.) -- since it will use the exact voices and prompts you already trained.
-
-**Option B** is the safer fallback if you need to keep OpenAI features but want different voices per teacher. The voices will be OpenAI's built-in voices (shimmer, nova, echo, onyx, alloy, etc.), not the Simli-trained ones.
-
-### Technical Details (Option B Implementation)
-
-**File: `src/lib/teachers.ts`**
-- Add `openaiVoice` field (one of: "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
-- Add `systemPrompt` field with each teacher's unique personality and subject expertise
+### Technical Changes
 
 **File: `src/hooks/useRealtimeChat.ts`**
-- Change the hook signature to accept a `Teacher` object or at minimum `voice` and `instructions` parameters
-- Replace hardcoded `voice: "shimmer"` (line 551) with the teacher's voice
-- Replace hardcoded instructions string (lines 414-550) with the teacher's system prompt
-- Store the teacher reference so reconnects use the same config
+1. Add refs for `teacherVoice` and `teacherInstructions` to avoid stale closures:
+   - `const teacherVoiceRef = useRef(teacherVoice)` 
+   - `const teacherInstructionsRef = useRef(teacherInstructions)`
+   - Update these refs in a `useEffect` whenever the props change
+   - Use `teacherVoiceRef.current` and `teacherInstructionsRef.current` inside `connectInternal` instead of the raw parameters
+2. After successful reconnect in `performReconnect`, restart recording if `wasListening` was true
+3. Increase `PROACTIVE_RECONNECT_TIME` to 110000 (110 seconds)
 
 **File: `src/pages/Index.tsx`**
-- Pass `selectedTeacher` to `useRealtimeChat()` or to `connect()`
+1. Remove line 50 (stale comment about selectedTeacher)
+
+**File: `src/hooks/useBSLRecognition.ts`**
+1. Update `loadScript` to also check `(window as any).Hands` before skipping load:
+   ```
+   if (document.querySelector(`script[src="${src}"]`) && (window as any).Hands) {
+     resolve();
+     return;
+   }
+   ```
 
