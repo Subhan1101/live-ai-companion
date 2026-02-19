@@ -2,6 +2,20 @@ import { useState } from "react";
 import { TEACHERS, type Teacher } from "@/lib/teachers";
 import { BookOpen, GraduationCap, Globe } from "lucide-react";
 
+import linaImg from "@/assets/teachers/lina.png";
+import zahraImg from "@/assets/teachers/zahra.png";
+import hankImg from "@/assets/teachers/hank.png";
+import markImg from "@/assets/teachers/mark.png";
+import kateImg from "@/assets/teachers/kate.png";
+
+const teacherImages: Record<string, string> = {
+  lina: linaImg,
+  zahra: zahraImg,
+  hank: hankImg,
+  mark: markImg,
+  kate: kateImg,
+};
+
 interface TeacherSelectProps {
   onSelect: (teacher: Teacher) => void;
 }
@@ -49,8 +63,8 @@ const TeacherSelect = ({ onSelect }: TeacherSelectProps) => {
               >
                 {/* Avatar + Name */}
                 <div className="flex items-center gap-3 mb-3">
-                  <div className={`w-12 h-12 rounded-full bg-gradient-to-br ${teacher.color} flex items-center justify-center text-2xl shadow-sm`}>
-                    {teacher.emoji}
+                  <div className="w-12 h-12 rounded-full overflow-hidden shadow-sm shrink-0">
+                    <img src={teacherImages[teacher.id]} alt={teacher.name} className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-display font-bold text-lg text-foreground truncate">
