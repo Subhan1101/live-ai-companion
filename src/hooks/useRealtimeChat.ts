@@ -56,7 +56,7 @@ const PROACTIVE_RECONNECT_TIME = 110000; // 1 min 50s - reconnect before backend
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY = 1000; // 1 second base delay for exponential backoff
 
-export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: string): UseRealtimeChatReturn => {
+export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: string, elevenLabsVoiceId?: string): UseRealtimeChatReturn => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [partialTranscript, setPartialTranscript] = useState("");
   const [isConnected, setIsConnected] = useState(false);
@@ -92,6 +92,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
   // Refs to avoid stale closures in connectInternal/performReconnect
   const teacherVoiceRef = useRef(teacherVoice);
   const teacherInstructionsRef = useRef(teacherInstructions);
+  const elevenLabsVoiceIdRef = useRef(elevenLabsVoiceId);
 
   // Whiteboard repair: sometimes the model emits placeholder tokens like "$1" instead of real formulas.
   const pendingWhiteboardRepairRef = useRef(false);
@@ -107,6 +108,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
   // Keep refs in sync with props
   useEffect(() => { teacherVoiceRef.current = teacherVoice; }, [teacherVoice]);
   useEffect(() => { teacherInstructionsRef.current = teacherInstructions; }, [teacherInstructions]);
+  useEffect(() => { elevenLabsVoiceIdRef.current = elevenLabsVoiceId; }, [elevenLabsVoiceId]);
 
   const countPlaceholderTokens = useCallback((text: string) => {
     // Match standalone "$<digit>" but avoid currency like $10 or $1.50
@@ -191,6 +193,88 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
     },
     []
   );
+
+  // Stream text to ElevenLabs TTS and pipe audio to Simli for lip-sync
+  const streamElevenLabsTTS = useCallback(async (text: string, voiceId: string) => {
+    if (!text || text.trim().length === 0) return;
+
+    console.log("Streaming ElevenLabs TTS:", { voiceId, textLength: text.length });
+    setIsSpeaking(true);
+    setStatus("speaking");
+
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/elevenlabs-tts-stream`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+          body: JSON.stringify({ text, voiceId }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("ElevenLabs TTS error:", response.status, errorText);
+        toast({
+          title: "Voice synthesis failed",
+          description: `ElevenLabs error: ${response.status}`,
+          variant: "destructive",
+        });
+        setIsSpeaking(false);
+        setStatus("idle");
+        return;
+      }
+
+      if (!response.body) {
+        console.error("No response body from ElevenLabs TTS");
+        setIsSpeaking(false);
+        setStatus("idle");
+        return;
+      }
+
+      const reader = response.body.getReader();
+      
+      // Reset resampler for clean start
+      resamplerRef.current.reset();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        if (value && value.length > 0) {
+          // Send to Simli for lip-sync (resample 24kHz PCM16 -> 16kHz)
+          if (simliSendAudioRef.current) {
+            const resampled = resamplerRef.current.process(value);
+            simliSendAudioRef.current(resampled);
+          }
+          
+          // Fallback: use AudioQueue if Simli is not available
+          if (!simliSendAudioRef.current && audioQueueRef.current) {
+            audioQueueRef.current.addToQueue(value);
+          }
+        }
+      }
+
+      console.log("ElevenLabs TTS stream complete");
+    } catch (error) {
+      console.error("ElevenLabs TTS streaming error:", error);
+      toast({
+        title: "Voice synthesis error",
+        description: "Failed to stream audio from ElevenLabs.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSpeaking(false);
+      setStatus("idle");
+    }
+  }, []);
 
   // Clear proactive reconnect timers
   const clearReconnectTimers = useCallback(() => {
@@ -422,19 +506,16 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
               }
 
               case "session.created":
-                console.log("Session created, sending configuration with Whisper-1 STT...");
+                console.log("Session created, sending configuration with Whisper-1 STT (text-only mode for ElevenLabs TTS)...");
                 sessionCreatedRef.current = true;
-                // Send session configuration after session is created
-                // Using OpenAI Realtime API with Whisper-1 for STT and selected voice for TTS
+                // Using text-only mode: OpenAI generates text, ElevenLabs generates audio
                 ws.send(
                   JSON.stringify({
                     type: "session.update",
                     session: {
-                      modalities: ["text", "audio"],
-                    instructions: teacherInstructionsRef.current || "You are EduGuide, a helpful AI teacher. Answer educational questions clearly and concisely.",
-                      voice: (teacherVoiceRef.current || "shimmer") as any,
+                      modalities: ["text"],
+                      instructions: teacherInstructionsRef.current || "You are EduGuide, a helpful AI teacher. Answer educational questions clearly and concisely.",
                       input_audio_format: "pcm16",
-                      output_audio_format: "pcm16",
                       input_audio_transcription: {
                         model: "whisper-1",
                       },
@@ -642,43 +723,15 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 break;
 
               case "response.audio.delta":
-                // TTS audio from OpenAI Realtime API (shimmer voice)
-                setIsSpeaking(true);
-                setStatus("speaking");
-                setIsProcessing(false);
-                
-                // Convert base64 to Uint8Array (24kHz PCM16)
-                if (data.delta) {
-                  const binaryString = atob(data.delta);
-                  const bytes = new Uint8Array(binaryString.length);
-                  for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                  }
-                  
-                  // Send to Simli for lip-sync (primary) - resample 24kHz -> 16kHz
-                  if (simliSendAudioRef.current) {
-                    const resampled = resamplerRef.current.process(bytes);
-                    simliSendAudioRef.current(resampled);
-                  }
-                  
-                  // Use fallback audio queue if Simli is not available (keep at 24kHz)
-                  if (!simliSendAudioRef.current && audioQueueRef.current) {
-                    audioQueueRef.current.addToQueue(bytes);
-                  }
-                }
+                // Legacy: OpenAI TTS audio (no longer used in text-only mode, but keep as safety)
+                console.log("Unexpected response.audio.delta in text-only mode");
                 break;
 
-              case "response.audio_transcript.delta":
-                // Live TTS transcript from OpenAI
+              case "response.text.delta":
+                // Live text streaming from OpenAI (text-only mode)
                 if (data.delta) {
                   setMessages((prev) => {
                     const last = prev[prev.length - 1];
-                    const newContent = last?.role === "assistant" 
-                      ? last.content + data.delta 
-                      : data.delta;
-                    
-                    // Note: Whiteboard content is now shown on-demand via button click
-                    // No auto-popup - user controls when to view whiteboard
                     
                     if (last?.role === "assistant") {
                       return prev.map((m, i) =>
@@ -698,33 +751,77 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 }
                 break;
 
-              case "response.audio_transcript.done":
-                console.log("TTS transcript complete");
-                // Clean up the chat message by removing whiteboard markers (but keep original for detection)
-                setMessages((prev) => {
-                  const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
-                  if (lastAssistant) {
-                    const { hasWhiteboard, content: wbContent } = extractWhiteboardContent(lastAssistant.content);
-                    console.log("[Whiteboard] Detection:", { hasWhiteboard, contentLength: lastAssistant.content.length, contentPreview: lastAssistant.content.substring(0, 200) });
-                    // Clean up the chat message by removing whiteboard markers
-                    const cleanedContent = removeWhiteboardMarkers(lastAssistant.content);
-                    // ALWAYS set originalContent so the whiteboard button can detect markers in any case
-                    return prev.map((m) =>
-                      m.id === lastAssistant.id 
-                        ? { 
-                            ...m, 
-                            originalContent: lastAssistant.content, // Always keep original for whiteboard button detection
-                            content: cleanedContent || (hasWhiteboard ? "I've prepared a detailed explanation. Click 'Whiteboard' to view." : lastAssistant.content)
-                          } 
-                        : m
-                    );
+              case "response.text.done": {
+                console.log("Text response complete, streaming to ElevenLabs TTS...");
+                setIsProcessing(false);
+                
+                // Get the full text from the response
+                const fullText = data.text;
+                if (fullText && fullText.trim().length > 0) {
+                  // Clean up whiteboard markers in the chat message
+                  const { hasWhiteboard, content: wbContent } = extractWhiteboardContent(fullText);
+                  console.log("[Whiteboard] Detection:", { hasWhiteboard, contentLength: fullText.length });
+                  const cleanedContent = removeWhiteboardMarkers(fullText);
+                  
+                  setMessages((prev) => {
+                    const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
+                    if (lastAssistant) {
+                      return prev.map((m) =>
+                        m.id === lastAssistant.id 
+                          ? { 
+                              ...m, 
+                              originalContent: fullText,
+                              content: cleanedContent || (hasWhiteboard ? "I've prepared a detailed explanation. Click 'Whiteboard' to view." : fullText)
+                            } 
+                          : m
+                      );
+                    }
+                    return prev;
+                  });
+
+                  // Stream text to ElevenLabs TTS for voice synthesis
+                  const voiceId = elevenLabsVoiceIdRef.current;
+                  if (voiceId) {
+                    // Strip whiteboard markers from speech
+                    const speechText = removeWhiteboardMarkers(fullText) || fullText;
+                    streamElevenLabsTTS(speechText, voiceId);
+                  } else {
+                    console.warn("No ElevenLabs voice ID set, skipping TTS");
                   }
-                  return prev;
-                });
+                }
+                break;
+              }
+
+              case "response.audio_transcript.delta":
+                // Legacy: kept for compatibility but text.delta is primary now
+                if (data.delta) {
+                  setMessages((prev) => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role === "assistant") {
+                      return prev.map((m, i) =>
+                        i === prev.length - 1 ? { ...m, content: m.content + data.delta } : m
+                      );
+                    }
+                    return [
+                      ...prev,
+                      {
+                        id: crypto.randomUUID(),
+                        role: "assistant",
+                        content: data.delta,
+                        timestamp: new Date(),
+                      },
+                    ];
+                  });
+                }
+                break;
+
+              case "response.audio_transcript.done":
+                // Legacy: no longer primary path
+                console.log("Legacy TTS transcript complete (text-only mode active)");
                 break;
 
               case "response.audio.done":
-                console.log("TTS audio stream complete");
+                console.log("Audio stream complete");
                 break;
 
               case "response.output_item.done":
