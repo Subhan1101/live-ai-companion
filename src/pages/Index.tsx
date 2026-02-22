@@ -52,6 +52,7 @@ const Index = () => {
   const [isMicOn, setIsMicOn] = useState(true);
   const [recordingTime, setRecordingTime] = useState(0);
   const [showFileUpload, setShowFileUpload] = useState(false);
+  const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isBSLEnabled, setIsBSLEnabled] = useState(false);
   const [isBSLLoading, setIsBSLLoading] = useState(false);
   const [bslResponseText, setBslResponseText] = useState('');
@@ -109,6 +110,7 @@ const Index = () => {
   const handleSimliReady = useCallback(
     (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => {
       setSimliAudioHandler(sendAudio, clearBuffer);
+      setIsAvatarReady(true);
       // Trigger greeting now that avatar is visible and lip-syncing
       sendGreeting();
       toast({
@@ -133,6 +135,15 @@ const Index = () => {
   };
 
   const handleToggleMic = () => {
+    // Block mic until avatar is fully loaded and ready for lip sync
+    if (!isAvatarReady) {
+      toast({
+        title: "Please wait",
+        description: "Teacher is still loading. Mic will be available shortly.",
+      });
+      return;
+    }
+
     // If the UI says mic is ON but we're not actually recording (common when the browser
     // blocked the initial mic permission because it wasn't triggered by a click),
     // treat this click as "try to enable mic".
@@ -254,6 +265,7 @@ const Index = () => {
   const handleToggleCall = () => {
     if (isConnected) {
       disconnect();
+      setIsAvatarReady(false);
       setRecordingTime(0);
       toast({
         title: "Call ended",
@@ -270,6 +282,7 @@ const Index = () => {
 
   const handleGoBack = () => {
     if (isConnected) disconnect();
+    setIsAvatarReady(false);
     setRecordingTime(0);
     setSelectedTeacher(null);
   };
@@ -532,8 +545,8 @@ const Index = () => {
         </div>
       </div>
 
-      {/* Microphone prompt - shown when connected but not recording */}
-      {isConnected && !isRecording && (
+      {/* Microphone prompt - shown when avatar is ready but not recording */}
+      {isConnected && isAvatarReady && !isRecording && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-pulse">
           <div className="px-4 py-2 bg-primary/90 text-primary-foreground rounded-full text-sm font-medium flex items-center gap-2 shadow-lg">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
