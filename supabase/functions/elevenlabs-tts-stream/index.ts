@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { text } = await req.json();
+    const { text, voiceId } = await req.json();
     const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
 
     if (!ELEVENLABS_API_KEY) {
@@ -30,13 +30,13 @@ serve(async (req) => {
       );
     }
 
-    // Lily voice ID from ElevenLabs
-    const LILY_VOICE_ID = "pFZP5JQG7iQjIQuC4Bku";
+    // Use provided voiceId or fall back to Lily
+    const VOICE_ID = voiceId || "pFZP5JQG7iQjIQuC4Bku";
 
-    console.log("Streaming TTS with Lily voice:", { textLength: text.length });
+    console.log("Streaming TTS with voice:", { voiceId: VOICE_ID, textLength: text.length });
 
     const response = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${LILY_VOICE_ID}/stream?output_format=pcm_24000`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream?output_format=pcm_24000`,
       {
         method: "POST",
         headers: {

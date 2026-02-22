@@ -182,14 +182,14 @@ const Index = () => {
       stopScreenShare();
       toast({
         title: "Screen sharing stopped",
-        description: "Aria can no longer see your screen.",
+        description: `${selectedTeacher?.name || 'Your teacher'} can no longer see your screen.`,
       });
     } else {
       try {
         await startScreenShare();
         toast({
           title: "Screen sharing started",
-          description: "Aria can now see your screen. Just ask about what's on screen!",
+          description: `${selectedTeacher?.name || 'Your teacher'} can now see your screen. Just ask about what's on screen!`,
         });
         
       } catch (error) {
@@ -207,7 +207,7 @@ const Index = () => {
     if (!isSharing) {
       toast({
         title: "No screen shared",
-        description: "Start screen sharing first to let Aria see your screen.",
+        description: `Start screen sharing first to let ${selectedTeacher?.name || 'your teacher'} see your screen.`,
         variant: "destructive",
       });
       return;
@@ -218,7 +218,7 @@ const Index = () => {
       sendImage(screenshot, "image/jpeg", "Look at my screen and help me with what you see. If there's a problem or question visible, help me solve it.");
       toast({
         title: "Screen captured",
-        description: "Aria is analyzing your screen...",
+        description: `${selectedTeacher?.name || 'Your teacher'} is analyzing your screen...`,
       });
     }
   }, [isSharing, captureScreenshot, sendImage]);
@@ -229,20 +229,20 @@ const Index = () => {
       sendImage(file.base64, file.type, `I've uploaded an image called "${file.name}". Please analyze it and help me with any questions.`);
       toast({
         title: "Image uploaded",
-        description: `Aria is analyzing ${file.name}...`,
+        description: `${selectedTeacher?.name || 'Your teacher'} is analyzing ${file.name}...`,
       });
     } else if (file.content) {
       sendTextContent(file.content, file.name);
       toast({
         title: "File uploaded",
-        description: `Aria is reading ${file.name}...`,
+        description: `${selectedTeacher?.name || 'Your teacher'} is reading ${file.name}...`,
       });
     } else if (file.base64) {
       // PDF - tell user it's uploaded but we can describe what kind of help they need
       sendTextContent(`[PDF file uploaded: ${file.name}] Please ask me about what you need help with from this document.`, file.name);
       toast({
         title: "PDF uploaded",
-        description: "Ask Aria about the contents of your PDF.",
+        description: `Ask ${selectedTeacher?.name || 'your teacher'} about the contents of your PDF.`,
       });
     }
     setShowFileUpload(false);
@@ -461,7 +461,7 @@ const Index = () => {
           <div className="bg-card p-6 rounded-2xl shadow-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold mb-4">Upload a File</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Upload images, PDFs, or text files for Aria to analyze.
+              Upload images, PDFs, or text files for {selectedTeacher?.name || 'your teacher'} to analyze.
             </p>
             <FileUpload onFileProcessed={handleFileProcessed} disabled={!isConnected} />
             <button

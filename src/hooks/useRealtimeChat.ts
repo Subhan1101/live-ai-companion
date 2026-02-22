@@ -460,6 +460,25 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 // Schedule proactive reconnection to prevent timeout
                 scheduleProactiveReconnect();
                 
+                // Auto-greeting: nudge the teacher to introduce themselves
+                if (!isReconnectingRef.current) {
+                  console.log("Sending auto-greeting prompt to teacher");
+                  const greetingItemId = crypto.randomUUID();
+                  ws.send(JSON.stringify({
+                    type: "conversation.item.create",
+                    item: {
+                      id: greetingItemId,
+                      type: "message",
+                      role: "user",
+                      content: [{
+                        type: "input_text",
+                        text: "You just connected with a student. Give a brief, warm greeting introducing yourself by name and asking how you can help today. Keep it to 2-3 sentences. Do NOT use whiteboard markers."
+                      }]
+                    }
+                  }));
+                  ws.send(JSON.stringify({ type: "response.create" }));
+                }
+                
                 // Start heartbeat to keep connection alive (every 15 seconds)
                 // More frequent heartbeats help prevent session timeouts around 3 minutes
                 if (heartbeatIntervalRef.current) {
