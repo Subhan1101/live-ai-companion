@@ -34,6 +34,7 @@ const Index = () => {
     sendImage,
     sendTextContent,
     sendBSLModeChange,
+    sendGreeting,
     whiteboardContent,
     showWhiteboard,
     openWhiteboard,
@@ -108,12 +109,14 @@ const Index = () => {
   const handleSimliReady = useCallback(
     (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => {
       setSimliAudioHandler(sendAudio, clearBuffer);
+      // Trigger greeting now that avatar is visible and lip-syncing
+      sendGreeting();
       toast({
         title: "Avatar Ready",
         description: "Simli avatar is now active and ready for conversation.",
       });
     },
-    [setSimliAudioHandler]
+    [setSimliAudioHandler, sendGreeting]
   );
 
   const handleMicPress = useCallback(() => {

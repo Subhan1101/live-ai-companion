@@ -41,6 +41,7 @@ interface UseRealtimeChatReturn {
   sendImage: (base64: string, mimeType: string, prompt?: string) => void;
   sendTextContent: (text: string, fileName?: string) => void;
   sendBSLModeChange: (enabled: boolean) => void;
+  sendGreeting: () => void;
   whiteboardContent: string;
   showWhiteboard: boolean;
   openWhiteboard: (content: string) => void;
@@ -460,24 +461,8 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 // Schedule proactive reconnection to prevent timeout
                 scheduleProactiveReconnect();
                 
-                // Auto-greeting: nudge the teacher to introduce themselves
-                if (!isReconnectingRef.current) {
-                  console.log("Sending auto-greeting prompt to teacher");
-                  const greetingItemId = crypto.randomUUID();
-                  ws.send(JSON.stringify({
-                    type: "conversation.item.create",
-                    item: {
-                      id: greetingItemId,
-                      type: "message",
-                      role: "user",
-                      content: [{
-                        type: "input_text",
-                        text: "You just connected with a student. Give a brief, warm greeting introducing yourself by name and asking how you can help today. Keep it to 2-3 sentences. Do NOT use whiteboard markers."
-                      }]
-                    }
-                  }));
-                  ws.send(JSON.stringify({ type: "response.create" }));
-                }
+                // Auto-greeting is now triggered by sendGreeting() when avatar is ready
+                // This prevents the greeting from playing before the avatar has loaded
                 
                 // Start heartbeat to keep connection alive (every 15 seconds)
                 // More frequent heartbeats help prevent session timeouts around 3 minutes
@@ -1109,6 +1094,40 @@ Your text will be displayed alongside BSL hand sign animations. Please adapt you
     // The AI will use this context for future responses
   }, []);
 
+  const hasGreetedRef = useRef(false);
+
+  const sendGreeting = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (hasGreetedRef.current) return;
+    if (isReconnectingRef.current) return;
+    hasGreetedRef.current = true;
+
+    console.log("Sending auto-greeting prompt to teacher (avatar ready)");
+    const greetingItemId = crypto.randomUUID();
+    wsRef.current.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        id: greetingItemId,
+        type: "message",
+        role: "user",
+        content: [{
+          type: "input_text",
+          text: "You just connected with a student. Give a brief, warm greeting introducing yourself by name and asking how you can help today. Keep it to 2-3 sentences. Do NOT use whiteboard markers."
+        }]
+      }
+    }));
+    wsRef.current.send(JSON.stringify({ type: "response.create" }));
+  }, []);
+
+  // Reset greeting flag on fresh connections (not reconnects)
+  const originalConnect = connect;
+  const connectWithGreetingReset = useCallback(async () => {
+    if (!isReconnectingRef.current) {
+      hasGreetedRef.current = false;
+    }
+    return originalConnect();
+  }, [originalConnect]);
+
   return {
     messages,
     partialTranscript,
@@ -1119,7 +1138,7 @@ Your text will be displayed alongside BSL hand sign animations. Please adapt you
     isSpeaking,
     audioLevel,
     status,
-    connect,
+    connect: connectWithGreetingReset,
     disconnect,
     startRecording,
     stopRecording,
@@ -1127,6 +1146,7 @@ Your text will be displayed alongside BSL hand sign animations. Please adapt you
     sendImage,
     sendTextContent,
     sendBSLModeChange,
+    sendGreeting,
     whiteboardContent,
     showWhiteboard,
     openWhiteboard,
