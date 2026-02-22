@@ -162,24 +162,44 @@ export const AvatarPanel = ({
           return;
         }
         
-        console.log("Simli client started successfully with face:", faceId);
-        setIsSimliReady(true);
-        setSimliError(null);
+        console.log("Simli client started, waiting for video frames...");
 
-        // Provide audio sending function to parent
-        if (onSimliReady) {
-          onSimliReady(
-            (audioData: Uint8Array) => {
-              if (simliClientRef.current) {
-                simliClientRef.current.sendAudioData(audioData);
-              }
-            },
-            () => {
-              if (simliClientRef.current) {
-                simliClientRef.current.ClearBuffer();
-              }
-            }
-          );
+        const sendAudio = (audioData: Uint8Array) => {
+          if (simliClientRef.current) {
+            simliClientRef.current.sendAudioData(audioData);
+          }
+        };
+        const clearBuffer = () => {
+          if (simliClientRef.current) {
+            simliClientRef.current.ClearBuffer();
+          }
+        };
+
+        // Wait for actual video frames before signaling ready
+        const video = videoRef.current;
+        const signalReady = () => {
+          if (!isMounted) return;
+          console.log("Simli video playing — signaling ready with face:", faceId);
+          setIsSimliReady(true);
+          setSimliError(null);
+          if (onSimliReady) {
+            onSimliReady(sendAudio, clearBuffer);
+          }
+        };
+
+        if (video && video.readyState >= 3) {
+          signalReady();
+        } else if (video) {
+          const onPlaying = () => {
+            video.removeEventListener("playing", onPlaying);
+            clearTimeout(fallback);
+            signalReady();
+          };
+          video.addEventListener("playing", onPlaying);
+          const fallback = setTimeout(() => {
+            video.removeEventListener("playing", onPlaying);
+            signalReady();
+          }, 5000);
         }
       } catch (error) {
         console.error("Simli initialization error:", error);
