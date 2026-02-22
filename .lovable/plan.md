@@ -1,69 +1,65 @@
 
 
-## Plan: Delay Auto-Greeting Until Avatar is Visible
+## Plan: Wait for Actual Video Frames Before Triggering Greeting
 
-### Problem
+### Root Cause
 
-When the session connects, the auto-greeting fires immediately after `session.updated`. But the Simli avatar takes several more seconds to initialize (fetch token, start LiveKit session, connect). The result: the teacher's voice greeting plays while the yellow "Teacher is coming..." loading screen is still showing -- no avatar, no lip sync.
+The `onSimliReady` callback fires right after `simliClient.start()` resolves. But at that point, the WebRTC connection is just established -- the video element hasn't received or rendered any frames yet. So the greeting fires while the yellow "Teacher is coming..." screen is still visible.
 
-### Solution
+### Fix
 
-Defer the auto-greeting until the Simli avatar signals it's ready. The avatar already calls `onSimliReady` when it's fully loaded. We'll use this signal to trigger the greeting.
+In `AvatarPanel.tsx`, instead of calling `onSimliReady` immediately after `simliClient.start()`, wait for the video element to actually start playing (i.e., it has received video frames and is rendering).
 
 ### Changes
 
-**1. `src/hooks/useRealtimeChat.ts`**
+**File: `src/components/AvatarPanel.tsx`**
 
-- Add a new function `sendGreeting()` that sends the greeting prompt (the same `conversation.item.create` + `response.create` that currently fires in `session.updated`)
-- Remove the greeting logic from inside the `session.updated` handler
-- Export `sendGreeting` so the parent component can call it when the avatar is ready
-- Add a guard (`hasGreetedRef`) to prevent double-greetings on reconnects
+After `simliClient.start()` resolves (line 158), instead of immediately setting `isSimliReady` and calling `onSimliReady`:
 
-**2. `src/pages/Index.tsx`**
+1. Add a listener on `videoRef.current` for the `"playing"` event (fires when the video has enough data and has started playing)
+2. Also add a fallback timeout (e.g., 5 seconds) in case the event doesn't fire reliably
+3. Only call `setIsSimliReady(true)` and `onSimliReady(...)` once the video is actually playing
 
-- Import and use the new `sendGreeting` from `useRealtimeChat`
-- In `handleSimliReady`, after setting the audio handler, call `sendGreeting()` to trigger the teacher's introduction
-- This ensures the greeting only plays after the avatar is visible and lip-syncing
-
-### Sequence After Fix
+The code will look like:
 
 ```text
-1. User selects teacher --> connect() called
-2. WebSocket opens --> session.update sent
-3. session.updated received --> connection ready (NO greeting yet)
-4. Simli avatar initializes in parallel (fetch token, start session)
-5. Simli avatar ready --> onSimliReady fires --> handleSimliReady called
-6. handleSimliReady calls sendGreeting() --> teacher introduces with lip sync
-```
+await simliClient.start();
 
-### Technical Details
+// Wait for actual video frames before signaling ready
+const video = videoRef.current;
+const signalReady = () => {
+  if (!isMounted) return;
+  setIsSimliReady(true);
+  setSimliError(null);
+  if (onSimliReady) {
+    onSimliReady(sendAudio, clearBuffer);
+  }
+};
 
-In `useRealtimeChat.ts`, the greeting code currently at lines 463-480 will be moved into a new exported `sendGreeting` function:
-
-```text
-const sendGreeting = useCallback(() => {
-  if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-  if (hasGreetedRef.current) return;
-  hasGreetedRef.current = true;
-
-  // Same conversation.item.create + response.create logic
-}, []);
-```
-
-The `hasGreetedRef` is reset to `false` when a new connection starts (not on reconnect).
-
-In `Index.tsx`, `handleSimliReady` becomes:
-
-```text
-const handleSimliReady = useCallback((...) => {
-  setSimliAudioHandler(sendAudio, clearBuffer);
-  sendGreeting();  // Trigger greeting now that avatar is visible
-}, [setSimliAudioHandler, sendGreeting]);
+// If video is already playing, signal immediately
+if (video && video.readyState >= 3) {
+  signalReady();
+} else if (video) {
+  // Wait for the playing event
+  const onPlaying = () => {
+    video.removeEventListener("playing", onPlaying);
+    clearTimeout(fallback);
+    signalReady();
+  };
+  video.addEventListener("playing", onPlaying);
+  // Fallback timeout in case event doesn't fire
+  const fallback = setTimeout(() => {
+    video.removeEventListener("playing", onPlaying);
+    signalReady();
+  }, 5000);
+}
 ```
 
 ### Files to Change
 
 | File | Change |
 |------|--------|
-| `src/hooks/useRealtimeChat.ts` | Extract greeting into `sendGreeting()`, export it, remove from `session.updated` |
-| `src/pages/Index.tsx` | Call `sendGreeting()` in `handleSimliReady` |
+| `src/components/AvatarPanel.tsx` | Defer `onSimliReady` until the video element fires `"playing"` event |
+
+No other files need changes -- the greeting and mic gating logic in `Index.tsx` and `useRealtimeChat.ts` already depend on `onSimliReady`, so once that fires at the right time, everything else works.
+
