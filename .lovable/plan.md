@@ -1,83 +1,69 @@
 
 
-## Plan: ElevenLabs Voices, Auto-Greeting, and BSL Output Fix
+## Plan: Delay Auto-Greeting Until Avatar is Visible
 
-### 1. Add ElevenLabs Voice IDs to Teacher Config
+### Problem
 
-**File: `src/lib/teachers.ts`**
+When the session connects, the auto-greeting fires immediately after `session.updated`. But the Simli avatar takes several more seconds to initialize (fetch token, start LiveKit session, connect). The result: the teacher's voice greeting plays while the yellow "Teacher is coming..." loading screen is still showing -- no avatar, no lip sync.
 
-- Add `elevenLabsVoiceId` field to the `Teacher` interface
-- Set each teacher's voice ID:
-  - Lina: `9BWtsMINqrJLrRacOk9x`
-  - Zahra: `OYTbf65OHHFELVut7v2H`
-  - Hank: `ewxUvnyvvOehYjKjUVKC`
-  - Mark: `qy3uP381xz2uje6kNLCG`
-  - Kate: `EIsgvJT3rwoPvRFG6c4n`
+### Solution
 
-### 2. Update ElevenLabs TTS Edge Functions to Accept Dynamic Voice ID
+Defer the auto-greeting until the Simli avatar signals it's ready. The avatar already calls `onSimliReady` when it's fully loaded. We'll use this signal to trigger the greeting.
 
-**Files: `supabase/functions/elevenlabs-tts/index.ts` and `supabase/functions/elevenlabs-tts-stream/index.ts`**
+### Changes
 
-- Currently both functions hardcode the Lily voice ID (`pFZP5JQG7iQjIQuC4Bku`)
-- Change to accept `voiceId` from the request body, falling back to Lily if not provided
-- This allows each teacher to speak with their own ElevenLabs voice
+**1. `src/hooks/useRealtimeChat.ts`**
 
-### 3. Auto-Greeting When Session Connects
+- Add a new function `sendGreeting()` that sends the greeting prompt (the same `conversation.item.create` + `response.create` that currently fires in `session.updated`)
+- Remove the greeting logic from inside the `session.updated` handler
+- Export `sendGreeting` so the parent component can call it when the avatar is ready
+- Add a guard (`hasGreetedRef`) to prevent double-greetings on reconnects
 
-**File: `src/hooks/useRealtimeChat.ts`**
+**2. `src/pages/Index.tsx`**
 
-- After `session.updated` is received (session is fully configured), automatically send a greeting prompt to the AI
-- Send a `conversation.item.create` with a hidden user message like: "You just connected with a student. Give a brief, warm greeting introducing yourself by name and asking how you can help today. Keep it to 2-3 sentences."
-- Follow with `response.create` to trigger the AI to speak the greeting
-- This ensures each teacher introduces themselves naturally on connection
+- Import and use the new `sendGreeting` from `useRealtimeChat`
+- In `handleSimliReady`, after setting the audio handler, call `sendGreeting()` to trigger the teacher's introduction
+- This ensures the greeting only plays after the avatar is visible and lip-syncing
 
-### 4. Fix BSL Output Overlay (Currently Only Showing Input)
+### Sequence After Fix
 
-**File: `src/components/VideoPanel.tsx`**
-
-- Currently the BSL toggle on the ControlBar enables BSL mode, which shows the BSL input overlay (camera hand tracking) on the VideoPanel
-- The BSL output overlay (`BSLOverlay` component) should also be shown, displaying sign-by-sign translation of the teacher's responses
-- The `BSLOverlay` is already imported and rendered in `VideoPanel.tsx` but may be hidden when input mode takes over
-- Ensure both overlays can coexist: the BSL output overlay shows the teacher's response signs, while the BSL input overlay handles camera-based sign detection
-- Check the conditional rendering logic to make sure `BSLOverlay` (output) is visible when `isBSLEnabled` is true and there is `bslText` content
-
-### 5. Fix Remaining "Aria" References
-
-**File: `src/pages/Index.tsx`**
-
-- Lines 185, 193, 211, etc. still reference "Aria" in toast messages for screen sharing and file upload
-- Replace all "Aria" references with the dynamic teacher name (`selectedTeacher.name`)
-
----
+```text
+1. User selects teacher --> connect() called
+2. WebSocket opens --> session.update sent
+3. session.updated received --> connection ready (NO greeting yet)
+4. Simli avatar initializes in parallel (fetch token, start session)
+5. Simli avatar ready --> onSimliReady fires --> handleSimliReady called
+6. handleSimliReady calls sendGreeting() --> teacher introduces with lip sync
+```
 
 ### Technical Details
 
-**Teacher config change:**
+In `useRealtimeChat.ts`, the greeting code currently at lines 463-480 will be moved into a new exported `sendGreeting` function:
+
 ```text
-// New field in Teacher interface
-elevenLabsVoiceId: string;
+const sendGreeting = useCallback(() => {
+  if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+  if (hasGreetedRef.current) return;
+  hasGreetedRef.current = true;
+
+  // Same conversation.item.create + response.create logic
+}, []);
 ```
 
-**Edge function change (both TTS functions):**
+The `hasGreetedRef` is reset to `false` when a new connection starts (not on reconnect).
+
+In `Index.tsx`, `handleSimliReady` becomes:
+
 ```text
-// Accept voiceId from request body
-const { text, voiceId } = await req.json();
-const VOICE_ID = voiceId || "pFZP5JQG7iQjIQuC4Bku"; // fallback to Lily
+const handleSimliReady = useCallback((...) => {
+  setSimliAudioHandler(sendAudio, clearBuffer);
+  sendGreeting();  // Trigger greeting now that avatar is visible
+}, [setSimliAudioHandler, sendGreeting]);
 ```
-
-**Auto-greeting (useRealtimeChat.ts):**
-After `session.updated` case, send a conversation item to trigger the teacher's self-introduction. The teacher's system prompt already contains their greeting text, so a simple nudge message will make them greet naturally.
-
-**BSL output fix (VideoPanel.tsx):**
-Verify that `BSLOverlay` renders when `isBSLEnabled && bslText` is present, ensuring the output signs are displayed alongside (not replaced by) the input overlay.
 
 ### Files to Change
 
 | File | Change |
 |------|--------|
-| `src/lib/teachers.ts` | Add `elevenLabsVoiceId` to interface and all 5 teachers |
-| `supabase/functions/elevenlabs-tts/index.ts` | Accept dynamic `voiceId` from request |
-| `supabase/functions/elevenlabs-tts-stream/index.ts` | Accept dynamic `voiceId` from request |
-| `src/hooks/useRealtimeChat.ts` | Auto-send greeting after session.updated |
-| `src/components/VideoPanel.tsx` | Fix BSL output overlay visibility |
-| `src/pages/Index.tsx` | Replace remaining "Aria" references with teacher name |
+| `src/hooks/useRealtimeChat.ts` | Extract greeting into `sendGreeting()`, export it, remove from `session.updated` |
+| `src/pages/Index.tsx` | Call `sendGreeting()` in `handleSimliReady` |
