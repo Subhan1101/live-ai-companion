@@ -506,14 +506,16 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
               }
 
               case "session.created":
-                console.log("Session created, sending configuration with Whisper-1 STT (text-only mode for ElevenLabs TTS)...");
+                console.log("Session created, sending configuration with Whisper-1 STT + OpenAI TTS...");
                 sessionCreatedRef.current = true;
-                // Using text-only mode: OpenAI generates text, ElevenLabs generates audio
+                // Text+audio mode: OpenAI generates both text and speech using built-in voices
                 ws.send(
                   JSON.stringify({
                     type: "session.update",
                     session: {
-                      modalities: ["text"],
+                      modalities: ["text", "audio"],
+                      voice: teacherVoiceRef.current || "shimmer",
+                      output_audio_format: "pcm16",
                       instructions: teacherInstructionsRef.current || "You are EduGuide, a helpful AI teacher. Answer educational questions clearly and concisely.",
                       input_audio_format: "pcm16",
                       input_audio_transcription: {
@@ -722,10 +724,34 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 console.log("Response output item added:", data.item?.type);
                 break;
 
-              case "response.audio.delta":
-                // Legacy: OpenAI TTS audio (no longer used in text-only mode, but keep as safety)
-                console.log("Unexpected response.audio.delta in text-only mode");
+              case "response.audio.delta": {
+                // OpenAI TTS audio - decode base64 PCM16, resample 24kHz→16kHz, send to Simli
+                if (data.delta) {
+                  setIsSpeaking(true);
+                  setStatus("speaking");
+                  try {
+                    const binaryString = atob(data.delta);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                      bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    
+                    // Send to Simli for lip-sync (resample 24kHz → 16kHz)
+                    if (simliSendAudioRef.current) {
+                      const resampled = resamplerRef.current.process(bytes);
+                      simliSendAudioRef.current(resampled);
+                    }
+                    
+                    // Fallback: use AudioQueue if Simli is not available
+                    if (!simliSendAudioRef.current && audioQueueRef.current) {
+                      audioQueueRef.current.addToQueue(bytes);
+                    }
+                  } catch (e) {
+                    console.error("Error processing audio delta:", e);
+                  }
+                }
                 break;
+              }
 
               case "response.text.delta":
                 // Live text streaming from OpenAI (text-only mode)
@@ -752,10 +778,10 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 break;
 
               case "response.text.done": {
-                console.log("Text response complete, streaming to ElevenLabs TTS...");
+                console.log("Text response complete (audio handled by OpenAI TTS)");
                 setIsProcessing(false);
                 
-                // Get the full text from the response
+                // Get the full text from the response for whiteboard detection
                 const fullText = data.text;
                 if (fullText && fullText.trim().length > 0) {
                   // Clean up whiteboard markers in the chat message
@@ -778,22 +804,12 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                     }
                     return prev;
                   });
-
-                  // Stream text to ElevenLabs TTS for voice synthesis
-                  const voiceId = elevenLabsVoiceIdRef.current;
-                  if (voiceId) {
-                    // Strip whiteboard markers from speech
-                    const speechText = removeWhiteboardMarkers(fullText) || fullText;
-                    streamElevenLabsTTS(speechText, voiceId);
-                  } else {
-                    console.warn("No ElevenLabs voice ID set, skipping TTS");
-                  }
                 }
                 break;
               }
 
               case "response.audio_transcript.delta":
-                // Legacy: kept for compatibility but text.delta is primary now
+                // Primary transcript path: OpenAI sends text alongside audio
                 if (data.delta) {
                   setMessages((prev) => {
                     const last = prev[prev.length - 1];
@@ -816,8 +832,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 break;
 
               case "response.audio_transcript.done":
-                // Legacy: no longer primary path
-                console.log("Legacy TTS transcript complete (text-only mode active)");
+                console.log("Audio transcript complete");
                 break;
 
               case "response.audio.done":
