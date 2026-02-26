@@ -221,10 +221,14 @@ export const AvatarPanel = ({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (simliClientRef.current) {
-        simliClientRef.current.close();
-        simliClientRef.current = null;
+      try {
+        if (simliClientRef.current) {
+          simliClientRef.current.close();
+        }
+      } catch (e) {
+        console.warn("Simli cleanup error (safe to ignore):", e);
       }
+      simliClientRef.current = null;
     };
   }, []);
 
