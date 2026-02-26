@@ -88,6 +88,8 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
   
   // PCM16 resampler for Simli (24kHz -> 16kHz)
   const resamplerRef = useRef<PCM16Resampler>(new PCM16Resampler(24000, 16000));
+  // PCM16 resampler for Hume TTS (48kHz -> 16kHz)
+  const humeResamplerRef = useRef<PCM16Resampler>(new PCM16Resampler(48000, 16000));
 
   // Refs to avoid stale closures in connectInternal/performReconnect
   const teacherVoiceRef = useRef(teacherVoice);
@@ -324,7 +326,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
       }
 
       const reader = response.body.getReader();
-      resamplerRef.current.reset();
+      humeResamplerRef.current.reset();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -332,7 +334,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
 
         if (value && value.length > 0) {
           if (simliSendAudioRef.current) {
-            const resampled = resamplerRef.current.process(value);
+            const resampled = humeResamplerRef.current.process(value);
             simliSendAudioRef.current(resampled);
           }
           if (!simliSendAudioRef.current && audioQueueRef.current) {
@@ -660,6 +662,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 }
                 // Reset resampler state on interruption
                 resamplerRef.current.reset();
+                humeResamplerRef.current.reset();
                 break;
 
               case "input_audio_buffer.speech_stopped":
