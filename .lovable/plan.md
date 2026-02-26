@@ -1,28 +1,34 @@
 
 
-## Fix: Hume AI Audio Not Playing
+## Diagnosis: Hume AI Audio Not Playing
 
-### Root Cause
-Hume AI's TTS API outputs PCM audio at **48kHz** by default, but the code resamples it using a 24kHz→16kHz resampler. This produces incorrectly pitched/silent audio when sent to Simli.
+### Analysis
 
-### Solution
-Create a separate resampler for the Hume TTS path that converts from 48kHz to 16kHz instead of 24kHz to 16kHz.
+From the logs, the data pipeline works end-to-end:
+- Hume TTS edge function returns 200 with binary PCM data
+- Client receives and processes all chunks ("Hume TTS stream complete")
+- No errors thrown
 
-### Changes
+The most likely causes (in order of probability):
 
-**1. `src/hooks/useRealtimeChat.ts`**
-- Add a dedicated `humeResamplerRef` initialized as `new PCM16Resampler(48000, 16000)`
-- Update `streamHumeTTS` to use this resampler instead of the shared one
-- Reset `humeResamplerRef` in the same places `resamplerRef` is reset
+1. **Byte alignment issue in streaming**: `reader.read()` from fetch may split PCM samples across chunks. The `PCM16Resampler` creates `Int16Array` views that require 2-byte alignment. Odd-length chunks would silently lose a byte, causing all subsequent audio to be misaligned/garbled.
 
-### Technical Detail
-- The existing `resamplerRef` (24kHz→16kHz) continues to serve OpenAI and ElevenLabs audio paths unchanged
-- Hume's default PCM output is 48kHz (confirmed by Hume documentation and their Pipecat integration which defaults to `sample_rate=48000`)
-- The PCM16Resampler class already accepts custom rates in its constructor, so no changes to `pcmResampler.ts` are needed
+2. **Missing debug visibility**: Simli's `enableConsoleLogs` is `false`, so if Simli silently drops audio (e.g., session not initialized), we'd never know.
 
-### Files to Change
+3. **Hume PCM might not be 48kHz**: While Pipecat defaults to 48kHz, the actual Hume API doesn't document PCM sample rate explicitly for streaming. If it's 24kHz, the 48k→16k resampler would produce audio at half the expected rate.
 
-| File | Change |
-|------|--------|
-| `src/hooks/useRealtimeChat.ts` | Add `humeResamplerRef` (48kHz→16kHz), use it in `streamHumeTTS` |
+### Plan
+
+**File: `src/hooks/useRealtimeChat.ts`** — Fix `streamHumeTTS`:
+- Add a byte accumulator buffer to handle uneven chunk boundaries (ensure only even-byte-count data reaches the resampler, carrying over any leftover byte to the next chunk)
+- Add debug logging: log chunk sizes, resampled output sizes, and whether `simliSendAudioRef.current` is set
+- Log total bytes sent to Simli at stream end
+
+**File: `supabase/functions/hume-tts-stream/index.ts`** — Explicit sample rate:
+- Add `sample_rate: 48000` to the Hume API format parameter to be explicit about the expected output rate
+
+**File: `src/components/AvatarPanel.tsx`** — Enable Simli debug logs:
+- Set `enableConsoleLogs: true` in Simli's `Initialize()` config so we can see if Simli is dropping audio
+
+These changes will either fix the issue (byte alignment) or provide the debug output needed to identify the exact failure point.
 
