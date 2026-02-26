@@ -1,54 +1,79 @@
 
 
-## Plan: Switch Back to OpenAI Built-in TTS Voices
+## Plan: Integrate Hume AI TTS for Mark (Test)
 
-### Why
+### Goal
+Replace Mark's OpenAI built-in voice with a custom Hume AI cloned voice. Other teachers remain on OpenAI TTS. This is a pilot test -- if it works well, we'll extend to all teachers.
 
-Your HR cannot purchase the ElevenLabs Pro plan, and you already have a paid OpenAI API. The good news is that each teacher already has a unique OpenAI voice assigned (shimmer, nova, echo, onyx, alloy) -- we just need to switch back to using them.
+### How It Works
 
-### What Changes
+Currently, OpenAI Realtime generates audio directly (text+audio mode). For Mark, we need to:
+1. Switch OpenAI to **text-only mode** (so it returns text, not audio)
+2. Send that text to **Hume AI TTS** to generate speech with the custom voice
+3. Stream the PCM audio to **Simli** for lip-sync
 
-Switch the OpenAI Realtime session back from "text only" mode to "text + audio" mode, so OpenAI generates speech directly using each teacher's assigned voice. Remove the ElevenLabs TTS streaming code path.
+For all other teachers, OpenAI's built-in audio mode continues unchanged.
 
-### Teacher Voice Assignments (Already Configured)
-
-| Teacher | OpenAI Voice |
-|---------|-------------|
-| Lina    | shimmer     |
-| Zahra   | nova        |
-| Hank    | echo        |
-| Mark    | onyx        |
-| Kate    | alloy       |
-
-These are 5 distinct OpenAI voices -- they will sound different from each other.
+### What You Need to Provide
+1. **Hume AI API Key** -- stored securely as a backend secret
+2. **Hume AI Voice ID** -- the cloned voice ID for Mark
 
 ### Technical Changes
 
-**File: `src/hooks/useRealtimeChat.ts`**
+**1. New Edge Function: `supabase/functions/hume-tts-stream/index.ts`**
+- Accepts `{ text, voiceId }` from the frontend
+- Calls Hume AI's streaming JSON endpoint: `POST https://api.hume.ai/v0/tts/stream/json`
+- Uses `X-Hume-Api-Key` header for auth
+- Requests PCM format at 24kHz (to match existing Simli pipeline)
+- Streams base64 PCM chunks back to the client as raw PCM bytes
+- Follows same pattern as the existing ElevenLabs edge function
 
-1. Change session config back to audio mode:
-   - `modalities: ["text", "audio"]` (was `["text"]`)
-   - Add back `voice: teacherVoiceRef.current || "shimmer"`
-   - Add back `output_audio_format: "pcm16"`
+**2. Update `src/lib/teachers.ts`**
+- Add a `humeVoiceId?: string` field to the `Teacher` interface
+- Set it only for Mark (with the voice ID you provide)
+- Other teachers: field remains `undefined`
 
-2. Re-enable `response.audio.delta` handler:
-   - Decode base64 PCM audio from OpenAI
-   - Resample 24kHz to 16kHz and send to Simli for lip-sync
-   - Fall back to AudioQueue if Simli is unavailable
+**3. Update `src/hooks/useRealtimeChat.ts`**
+- Accept new param: `humeVoiceId?: string`
+- **Session config logic**: If `humeVoiceId` is set, use `modalities: ["text"]` (text-only mode, no OpenAI audio). Otherwise keep `["text", "audio"]` with OpenAI voice.
+- **In `response.text.done`**: If `humeVoiceId` is set, call a new `streamHumeTTS()` function (similar to existing `streamElevenLabsTTS`) that hits the new edge function and pipes PCM to Simli.
+- **Transcript handling**: When in text-only mode (Hume path), use `response.text.delta` for transcripts. When in audio mode (OpenAI path), use `response.audio_transcript.delta`.
 
-3. In `response.text.done`:
-   - Keep whiteboard detection and transcript cleanup
-   - Remove the ElevenLabs TTS call (`streamElevenLabsTTS`)
+**4. Update `src/pages/Index.tsx`**
+- Pass `selectedTeacher?.humeVoiceId` to `useRealtimeChat`
 
-4. Re-enable `response.audio_transcript.delta` and `response.audio_transcript.done` as the primary transcript handlers (OpenAI sends these alongside audio)
+**5. Update `supabase/config.toml`**
+- Add `[functions.hume-tts-stream]` with `verify_jwt = false`
 
-5. The `streamElevenLabsTTS` function can stay but won't be called -- or we can remove it to keep things clean.
+### Architecture Flow
 
-**No other files need changes** -- `Index.tsx` already passes `teacherVoice` (the OpenAI voice name) to the hook.
+```text
+Mark (Hume AI):
+  User speaks → OpenAI Realtime (text only) → response.text.done
+    → Edge Function (hume-tts-stream) → Hume AI API (PCM stream)
+    → Resample 24kHz→16kHz → Simli (lip-sync)
+
+Other Teachers (OpenAI TTS):
+  User speaks → OpenAI Realtime (text+audio) → response.audio.delta
+    → Resample 24kHz→16kHz → Simli (lip-sync)
+```
 
 ### Files to Change
 
 | File | Change |
 |------|--------|
-| `src/hooks/useRealtimeChat.ts` | Switch back to text+audio mode, re-enable audio.delta handler, remove ElevenLabs TTS call |
+| `supabase/functions/hume-tts-stream/index.ts` | New edge function for Hume AI TTS streaming |
+| `supabase/config.toml` | Add `hume-tts-stream` function config |
+| `src/lib/teachers.ts` | Add `humeVoiceId` field, set for Mark |
+| `src/hooks/useRealtimeChat.ts` | Add Hume TTS path, conditional text/audio mode |
+| `src/pages/Index.tsx` | Pass `humeVoiceId` to hook |
+
+### Secrets Required
+- `HUME_API_KEY` -- your Hume AI API key (will be stored securely as a backend secret)
+
+### After Implementation
+Select Mark as teacher, speak to him, and verify:
+- You hear the custom cloned voice (not OpenAI's "onyx")
+- Lip-sync works with Simli
+- Transcript appears correctly in chat
 
