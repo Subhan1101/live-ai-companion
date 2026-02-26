@@ -56,7 +56,7 @@ const PROACTIVE_RECONNECT_TIME = 110000; // 1 min 50s - reconnect before backend
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY = 1000; // 1 second base delay for exponential backoff
 
-export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: string, elevenLabsVoiceId?: string): UseRealtimeChatReturn => {
+export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: string, elevenLabsVoiceId?: string, humeVoiceId?: string): UseRealtimeChatReturn => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [partialTranscript, setPartialTranscript] = useState("");
   const [isConnected, setIsConnected] = useState(false);
@@ -93,6 +93,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
   const teacherVoiceRef = useRef(teacherVoice);
   const teacherInstructionsRef = useRef(teacherInstructions);
   const elevenLabsVoiceIdRef = useRef(elevenLabsVoiceId);
+  const humeVoiceIdRef = useRef(humeVoiceId);
 
   // Whiteboard repair: sometimes the model emits placeholder tokens like "$1" instead of real formulas.
   const pendingWhiteboardRepairRef = useRef(false);
@@ -109,6 +110,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
   useEffect(() => { teacherVoiceRef.current = teacherVoice; }, [teacherVoice]);
   useEffect(() => { teacherInstructionsRef.current = teacherInstructions; }, [teacherInstructions]);
   useEffect(() => { elevenLabsVoiceIdRef.current = elevenLabsVoiceId; }, [elevenLabsVoiceId]);
+  useEffect(() => { humeVoiceIdRef.current = humeVoiceId; }, [humeVoiceId]);
 
   const countPlaceholderTokens = useCallback((text: string) => {
     // Match standalone "$<digit>" but avoid currency like $10 or $1.50
@@ -268,6 +270,83 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
       toast({
         title: "Voice synthesis error",
         description: "Failed to stream audio from ElevenLabs.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSpeaking(false);
+      setStatus("idle");
+    }
+  }, []);
+
+  // Stream text to Hume AI TTS and pipe audio to Simli for lip-sync
+  const streamHumeTTS = useCallback(async (text: string, voiceId: string) => {
+    if (!text || text.trim().length === 0) return;
+
+    console.log("Streaming Hume TTS:", { voiceId, textLength: text.length });
+    setIsSpeaking(true);
+    setStatus("speaking");
+
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/hume-tts-stream`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+          body: JSON.stringify({ text, voiceId }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Hume TTS error:", response.status, errorText);
+        toast({
+          title: "Voice synthesis failed",
+          description: `Hume AI error: ${response.status}`,
+          variant: "destructive",
+        });
+        setIsSpeaking(false);
+        setStatus("idle");
+        return;
+      }
+
+      if (!response.body) {
+        console.error("No response body from Hume TTS");
+        setIsSpeaking(false);
+        setStatus("idle");
+        return;
+      }
+
+      const reader = response.body.getReader();
+      resamplerRef.current.reset();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        if (value && value.length > 0) {
+          if (simliSendAudioRef.current) {
+            const resampled = resamplerRef.current.process(value);
+            simliSendAudioRef.current(resampled);
+          }
+          if (!simliSendAudioRef.current && audioQueueRef.current) {
+            audioQueueRef.current.addToQueue(value);
+          }
+        }
+      }
+
+      console.log("Hume TTS stream complete");
+    } catch (error) {
+      console.error("Hume TTS streaming error:", error);
+      toast({
+        title: "Voice synthesis error",
+        description: "Failed to stream audio from Hume AI.",
         variant: "destructive",
       });
     } finally {
@@ -505,35 +584,37 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 break;
               }
 
-              case "session.created":
-                console.log("Session created, sending configuration with Whisper-1 STT + OpenAI TTS...");
+              case "session.created": {
+                const useHume = !!humeVoiceIdRef.current;
+                console.log(`Session created, configuring ${useHume ? 'text-only (Hume TTS)' : 'text+audio (OpenAI TTS)'}...`);
                 sessionCreatedRef.current = true;
-                // Text+audio mode: OpenAI generates both text and speech using built-in voices
-                ws.send(
-                  JSON.stringify({
-                    type: "session.update",
-                    session: {
-                      modalities: ["text", "audio"],
-                      voice: teacherVoiceRef.current || "shimmer",
-                      output_audio_format: "pcm16",
-                      instructions: teacherInstructionsRef.current || "You are EduGuide, a helpful AI teacher. Answer educational questions clearly and concisely.",
-                      input_audio_format: "pcm16",
-                      input_audio_transcription: {
-                        model: "whisper-1",
-                      },
-                      turn_detection: {
-                        type: "server_vad",
-                        threshold: 0.5,
-                        prefix_padding_ms: 300,
-                        silence_duration_ms: 800,
-                        create_response: true,
-                      },
-                      temperature: 0.8,
-                      max_response_output_tokens: "inf",
-                    },
-                  })
-                );
+                
+                const sessionConfig: Record<string, unknown> = {
+                  modalities: useHume ? ["text"] : ["text", "audio"],
+                  instructions: teacherInstructionsRef.current || "You are EduGuide, a helpful AI teacher. Answer educational questions clearly and concisely.",
+                  input_audio_format: "pcm16",
+                  input_audio_transcription: {
+                    model: "whisper-1",
+                  },
+                  turn_detection: {
+                    type: "server_vad",
+                    threshold: 0.5,
+                    prefix_padding_ms: 300,
+                    silence_duration_ms: 800,
+                    create_response: true,
+                  },
+                  temperature: 0.8,
+                  max_response_output_tokens: "inf",
+                };
+                
+                if (!useHume) {
+                  sessionConfig.voice = teacherVoiceRef.current || "shimmer";
+                  sessionConfig.output_audio_format = "pcm16";
+                }
+                
+                ws.send(JSON.stringify({ type: "session.update", session: sessionConfig }));
                 break;
+              }
 
               case "session.updated":
                 console.log("Session configured with Whisper-1 STT - ready for voice input");
@@ -778,7 +859,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 break;
 
               case "response.text.done": {
-                console.log("Text response complete (audio handled by OpenAI TTS)");
+                console.log("Text response complete");
                 setIsProcessing(false);
                 
                 // Get the full text from the response for whiteboard detection
@@ -804,6 +885,12 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                     }
                     return prev;
                   });
+                  
+                  // If using Hume TTS, stream the text to Hume for speech synthesis
+                  if (humeVoiceIdRef.current && fullText) {
+                    const textForTTS = cleanedContent || fullText;
+                    streamHumeTTS(textForTTS, humeVoiceIdRef.current);
+                  }
                 }
                 break;
               }

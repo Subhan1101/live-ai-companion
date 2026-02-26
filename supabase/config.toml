@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.simli-token]
 verify_jwt = false
+
+[functions.hume-tts-stream]
+verify_jwt = false
