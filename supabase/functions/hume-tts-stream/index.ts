@@ -53,7 +53,7 @@ serve(async (req) => {
             voice: { id: voiceId },
           },
         ],
-        format: { type: "pcm" },
+        format: { type: "pcm", sample_rate: 48000 },
       }),
     });
 

@@ -328,22 +328,46 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
       const reader = response.body.getReader();
       humeResamplerRef.current.reset();
 
+      // Byte accumulator to handle odd-length chunks (PCM16 = 2 bytes per sample)
+      let carryOver: Uint8Array | null = null;
+      let totalBytesSent = 0;
+
+      console.log("[Hume TTS] simliSendAudioRef set:", !!simliSendAudioRef.current);
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         if (value && value.length > 0) {
-          if (simliSendAudioRef.current) {
-            const resampled = humeResamplerRef.current.process(value);
-            simliSendAudioRef.current(resampled);
+          // Merge with any leftover byte from previous chunk
+          let chunk: Uint8Array;
+          if (carryOver) {
+            chunk = new Uint8Array(carryOver.length + value.length);
+            chunk.set(carryOver);
+            chunk.set(value, carryOver.length);
+            carryOver = null;
+          } else {
+            chunk = value;
           }
-          if (!simliSendAudioRef.current && audioQueueRef.current) {
-            audioQueueRef.current.addToQueue(value);
+
+          // If odd number of bytes, carry over the last byte
+          if (chunk.length % 2 !== 0) {
+            carryOver = new Uint8Array([chunk[chunk.length - 1]]);
+            chunk = chunk.slice(0, chunk.length - 1);
+          }
+
+          if (chunk.length > 0 && simliSendAudioRef.current) {
+            const resampled = humeResamplerRef.current.process(chunk);
+            console.log(`[Hume TTS] chunk: ${chunk.length}B → resampled: ${resampled.length}B`);
+            simliSendAudioRef.current(resampled);
+            totalBytesSent += resampled.length;
+          } else if (chunk.length > 0 && audioQueueRef.current) {
+            audioQueueRef.current.addToQueue(chunk);
           }
         }
       }
 
-      console.log("Hume TTS stream complete");
+      console.log(`[Hume TTS] stream complete, total bytes sent to Simli: ${totalBytesSent}`);
     } catch (error) {
       console.error("Hume TTS streaming error:", error);
       toast({
