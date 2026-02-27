@@ -150,7 +150,7 @@ export const AvatarPanel = ({
           videoReceivedTimeout: 15000,
           enableSFU: true,
           model: "fasttalk",
-          enableConsoleLogs: true,
+          enableConsoleLogs: false,
         });
 
         simliClientRef.current = simliClient;

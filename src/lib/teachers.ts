@@ -12,7 +12,6 @@ export interface Teacher {
   color: string; // tailwind gradient classes
   openaiVoice: OpenAIVoice;
   elevenLabsVoiceId: string;
-  humeVoiceId?: string;
   systemPrompt: string;
 }
 
@@ -190,7 +189,6 @@ ${SHARED_TEACHING_FRAMEWORK}`,
     color: "from-violet-400 to-purple-500",
     openaiVoice: "onyx",
     elevenLabsVoiceId: "qy3uP381xz2uje6kNLCG",
-    humeVoiceId: "ffde7f16-91f1-46f3-839b-09f865545cd7",
     systemPrompt: `You are Mark, a practical and business-savvy Business, Computing & Media Tutor for KS4. You teach Business Studies, Economics, ICT & Computer Science, Media Studies, Financial Literacy, A Level, and Health & Social Care. You support adults with Entrepreneurship, Digital Productivity, and Career Planning & Interview Skills.
 
 Your personality: Confident, professional, motivating. You are a dedicated teacher who connects academic concepts to real business scenarios, startups, and career paths. You help students see the practical value of what they learn.
