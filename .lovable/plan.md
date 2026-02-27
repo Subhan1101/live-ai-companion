@@ -1,34 +1,45 @@
 
 
-## Diagnosis: Hume AI Audio Not Playing
+## Plan: Remove Hume AI Voice, Use OpenAI Voices for All Teachers
 
-### Analysis
+### What's changing
+Remove the non-working Hume AI voice integration entirely. All 5 teachers will use OpenAI's built-in Realtime voices (which already work with lip-sync). Each teacher already has a unique OpenAI voice assigned:
 
-From the logs, the data pipeline works end-to-end:
-- Hume TTS edge function returns 200 with binary PCM data
-- Client receives and processes all chunks ("Hume TTS stream complete")
-- No errors thrown
+| Teacher | OpenAI Voice |
+|---------|-------------|
+| Lina | shimmer |
+| Zahra | nova |
+| Hank | echo |
+| Mark | onyx |
+| Kate | alloy |
 
-The most likely causes (in order of probability):
+### Changes
 
-1. **Byte alignment issue in streaming**: `reader.read()` from fetch may split PCM samples across chunks. The `PCM16Resampler` creates `Int16Array` views that require 2-byte alignment. Odd-length chunks would silently lose a byte, causing all subsequent audio to be misaligned/garbled.
+**1. `src/lib/teachers.ts`**
+- Remove `humeVoiceId` field from the `Teacher` interface
+- Remove `humeVoiceId` value from Mark's entry
+- Remove `elevenLabsVoiceId` field if also unused (ElevenLabs appears unused in the active flow too — will verify)
 
-2. **Missing debug visibility**: Simli's `enableConsoleLogs` is `false`, so if Simli silently drops audio (e.g., session not initialized), we'd never know.
+**2. `src/hooks/useRealtimeChat.ts`**
+- Remove the `humeVoiceId` parameter from the hook signature
+- Remove `humeResamplerRef` (the 48kHz resampler)
+- Remove the entire `streamHumeTTS` function
+- Remove the Hume TTS trigger in `response.text.done` handler
+- Remove the text-only mode branching in `session.created` — always use `["text", "audio"]` modalities with the teacher's OpenAI voice
+- Remove `humeVoiceIdRef` and its effect
+- Clean up `humeResamplerRef.reset()` calls
 
-3. **Hume PCM might not be 48kHz**: While Pipecat defaults to 48kHz, the actual Hume API doesn't document PCM sample rate explicitly for streaming. If it's 24kHz, the 48k→16k resampler would produce audio at half the expected rate.
+**3. `src/pages/Index.tsx`**
+- Remove `humeVoiceId` from the `useRealtimeChat` call
 
-### Plan
+**4. `supabase/functions/hume-tts-stream/index.ts`**
+- Delete this edge function entirely (no longer needed)
 
-**File: `src/hooks/useRealtimeChat.ts`** — Fix `streamHumeTTS`:
-- Add a byte accumulator buffer to handle uneven chunk boundaries (ensure only even-byte-count data reaches the resampler, carrying over any leftover byte to the next chunk)
-- Add debug logging: log chunk sizes, resampled output sizes, and whether `simliSendAudioRef.current` is set
-- Log total bytes sent to Simli at stream end
+**5. `src/components/AvatarPanel.tsx`**
+- Revert `enableConsoleLogs` back to `false` (was only for Hume debugging)
 
-**File: `supabase/functions/hume-tts-stream/index.ts`** — Explicit sample rate:
-- Add `sample_rate: 48000` to the Hume API format parameter to be explicit about the expected output rate
-
-**File: `src/components/AvatarPanel.tsx`** — Enable Simli debug logs:
-- Set `enableConsoleLogs: true` in Simli's `Initialize()` config so we can see if Simli is dropping audio
-
-These changes will either fix the issue (byte alignment) or provide the debug output needed to identify the exact failure point.
+### What stays
+- OpenAI Realtime voice path (`response.audio.delta` → resample 24kHz→16kHz → Simli) — this already works
+- ElevenLabs edge functions (kept as fallback infrastructure, not actively used in the main flow)
+- The `elevenLabsVoiceId` field stays in teachers for potential future use
 
