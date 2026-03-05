@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { TEACHERS, type Teacher } from "@/lib/teachers";
-import { BookOpen, GraduationCap, Globe } from "lucide-react";
+import { BookOpen, GraduationCap, Globe, Mic, MicOff } from "lucide-react";
+import { useVoiceNavigation } from "@/hooks/useVoiceNavigation";
 
 import linaImg from "@/assets/teachers/lina.png";
 import zahraImg from "@/assets/teachers/zahra.png";
@@ -16,6 +17,14 @@ const teacherImages: Record<string, string> = {
   kate: kateImg,
 };
 
+const TEACHER_DESCRIPTIONS: Record<string, string> = {
+  lina: "Lina, for primary foundations",
+  zahra: "Zahra, for English and ethics",
+  hank: "Hank, for STEM subjects",
+  mark: "Mark, for business and tech",
+  kate: "Kate, for humanities and creative arts",
+};
+
 interface TeacherSelectProps {
   onSelect: (teacher: Teacher) => void;
 }
@@ -23,12 +32,51 @@ interface TeacherSelectProps {
 const TeacherSelect = ({ onSelect }: TeacherSelectProps) => {
   const [selected, setSelected] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceHighlight, setVoiceHighlight] = useState<string | null>(null);
+  const hasAnnouncedRef = useRef(false);
 
-  const handleSelect = (teacher: Teacher) => {
+  const handleSelect = useCallback((teacher: Teacher) => {
     setSelected(teacher.id);
-    // Small delay so the user sees the selection highlight
     setTimeout(() => onSelect(teacher), 350);
-  };
+  }, [onSelect]);
+
+  const handleVoiceMatch = useCallback((keyword: string) => {
+    const teacher = TEACHERS.find(
+      (t) => t.name.toLowerCase() === keyword.toLowerCase()
+    );
+    if (teacher) {
+      setVoiceHighlight(teacher.id);
+      setTimeout(() => handleSelect(teacher), 800);
+    }
+  }, [handleSelect]);
+
+  const { isListening, transcript, isSupported } = useVoiceNavigation({
+    keywords: TEACHERS.map((t) => t.name),
+    enabled: voiceEnabled,
+    onMatch: handleVoiceMatch,
+  });
+
+  // TTS announcement on voice enable
+  useEffect(() => {
+    if (voiceEnabled && !hasAnnouncedRef.current && "speechSynthesis" in window) {
+      hasAnnouncedRef.current = true;
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+
+      const descriptions = TEACHERS.map((t) => TEACHER_DESCRIPTIONS[t.id]).join(", ");
+      const utterance = new SpeechSynthesisUtterance(
+        `Welcome. You can choose a teacher by saying their name. Available teachers are: ${descriptions}. Which teacher would you like?`
+      );
+      utterance.rate = 0.95;
+      utterance.pitch = 1;
+      window.speechSynthesis.speak(utterance);
+    }
+    if (!voiceEnabled) {
+      hasAnnouncedRef.current = false;
+      window.speechSynthesis?.cancel();
+    }
+  }, [voiceEnabled]);
 
   return (
     <div className="h-screen bg-background flex flex-col items-center justify-center p-4 overflow-auto">
@@ -41,12 +89,40 @@ const TeacherSelect = ({ onSelect }: TeacherSelectProps) => {
           <p className="text-muted-foreground text-sm md:text-base">
             Select a tutor to start your learning session
           </p>
+
+          {/* Voice control toggle */}
+          {isSupported && (
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <button
+                onClick={() => setVoiceEnabled((v) => !v)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-300
+                  ${voiceEnabled
+                    ? "bg-primary text-primary-foreground shadow-md"
+                    : "bg-muted text-muted-foreground hover:bg-accent"
+                  }`}
+                aria-label={voiceEnabled ? "Disable voice control" : "Enable voice control"}
+              >
+                {voiceEnabled ? (
+                  <Mic className="w-4 h-4 animate-pulse" />
+                ) : (
+                  <MicOff className="w-4 h-4" />
+                )}
+                {voiceEnabled ? "Listening... say a teacher's name" : "Enable voice control"}
+              </button>
+              {isListening && transcript && (
+                <p className="text-xs text-muted-foreground animate-in fade-in">
+                  Heard: "<span className="text-foreground font-medium">{transcript}</span>"
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Teacher grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {TEACHERS.map((teacher) => {
             const isSelected = selected === teacher.id;
+            const isVoiceHighlighted = voiceHighlight === teacher.id;
             const isExpanded = expanded === teacher.id;
 
             return (
@@ -56,7 +132,7 @@ const TeacherSelect = ({ onSelect }: TeacherSelectProps) => {
                 onMouseEnter={() => setExpanded(teacher.id)}
                 onMouseLeave={() => setExpanded(null)}
                 className={`relative rounded-2xl p-5 text-left transition-all duration-300 border-2 group
-                  ${isSelected
+                  ${isSelected || isVoiceHighlighted
                     ? "border-primary scale-[1.03] shadow-lg ring-2 ring-primary/30"
                     : "border-border hover:border-primary/40 hover:shadow-md"
                   } bg-card`}
@@ -109,7 +185,7 @@ const TeacherSelect = ({ onSelect }: TeacherSelectProps) => {
                 )}
 
                 {/* Selection indicator */}
-                {isSelected && (
+                {(isSelected || isVoiceHighlighted) && (
                   <div className="absolute top-3 right-3 w-6 h-6 rounded-full bg-primary flex items-center justify-center">
                     <svg className="w-3.5 h-3.5 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
