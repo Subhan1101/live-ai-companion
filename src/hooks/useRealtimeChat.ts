@@ -809,12 +809,38 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
 
               case "response.audio_transcript.delta":
                 // Primary transcript path: OpenAI sends text alongside audio
+                // Suppress whiteboard content from streaming into the chat bubble
                 if (data.delta) {
                   setMessages((prev) => {
                     const last = prev[prev.length - 1];
                     if (last?.role === "assistant") {
+                      const newContent = last.content + data.delta;
+                      // Check if whiteboard marker has started appearing
+                      const wbStartIdx = newContent.indexOf("[WHITEBOARD_START]");
+                      // Also check for partial marker at the end (streaming character by character)
+                      const partialMarker = "[WHITEBOARD_START]";
+                      let hasPartialMarker = false;
+                      for (let len = 1; len < partialMarker.length; len++) {
+                        if (newContent.endsWith(partialMarker.substring(0, len))) {
+                          hasPartialMarker = true;
+                          break;
+                        }
+                      }
+                      
+                      if (wbStartIdx >= 0) {
+                        // Whiteboard marker found - only show content before it
+                        const preMarkerContent = newContent.substring(0, wbStartIdx).trim();
+                        const displayContent = preMarkerContent || "I've prepared a detailed explanation. Click 'Whiteboard' to view.";
+                        return prev.map((m, i) =>
+                          i === prev.length - 1 
+                            ? { ...m, content: displayContent, originalContent: newContent }
+                            : m
+                        );
+                      }
+                      
+                      // Store full content in originalContent as it streams (for whiteboard detection later)
                       return prev.map((m, i) =>
-                        i === prev.length - 1 ? { ...m, content: m.content + data.delta } : m
+                        i === prev.length - 1 ? { ...m, content: hasPartialMarker ? m.content : newContent, originalContent: newContent } : m
                       );
                     }
                     return [
@@ -823,6 +849,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                         id: crypto.randomUUID(),
                         role: "assistant",
                         content: data.delta,
+                        originalContent: data.delta,
                         timestamp: new Date(),
                       },
                     ];
@@ -830,9 +857,35 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 }
                 break;
 
-              case "response.audio_transcript.done":
+              case "response.audio_transcript.done": {
                 console.log("Audio transcript complete");
+                // Apply the same whiteboard cleanup as response.text.done
+                const audioFullText = data.transcript;
+                if (audioFullText && audioFullText.trim().length > 0) {
+                  const { hasWhiteboard: audioHasWb, content: audioWbContent } = extractWhiteboardContent(audioFullText);
+                  console.log("[Whiteboard] Audio transcript detection:", { audioHasWb, contentLength: audioFullText.length });
+                  const audioCleanedContent = removeWhiteboardMarkers(audioFullText);
+                  
+                  setMessages((prev) => {
+                    const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
+                    if (lastAssistant) {
+                      return prev.map((m) =>
+                        m.id === lastAssistant.id
+                          ? {
+                              ...m,
+                              originalContent: audioFullText,
+                              content: audioHasWb
+                                ? (audioCleanedContent.replace(/\[WHITEBOARD_START\]|\[WHITEBOARD_END\]/g, '').trim() || "I've prepared a detailed explanation. Click 'Whiteboard' to view.")
+                                : audioCleanedContent || m.content,
+                            }
+                          : m
+                      );
+                    }
+                    return prev;
+                  });
+                }
                 break;
+              }
 
               case "response.audio.done":
                 console.log("Audio stream complete");
