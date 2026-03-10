@@ -39,7 +39,7 @@ interface UseRealtimeChatReturn {
 
 const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
 
-const GEMINI_MODEL = "gemini-2.5-flash-live-preview";
+const GEMINI_MODEL = "gemini-live-2.5-flash-preview";
 
 // Reconnect constants
 const MAX_RECONNECT_ATTEMPTS = 5;
