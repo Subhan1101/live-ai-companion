@@ -1,4 +1,4 @@
-export type OpenAIVoice = "alloy" | "ash" | "ballad" | "coral" | "echo" | "fable" | "nova" | "onyx" | "sage" | "shimmer";
+export type GeminiVoice = "Kore" | "Aoede" | "Puck" | "Charon" | "Leda" | "Fenrir" | "Orus" | "Zephyr";
 
 export interface Teacher {
   id: string;
@@ -10,7 +10,7 @@ export interface Teacher {
   adultSupport: string[];
   emoji: string;
   color: string; // tailwind gradient classes
-  openaiVoice: OpenAIVoice;
+  geminiVoice: GeminiVoice;
   elevenLabsVoiceId: string;
   systemPrompt: string;
 }
@@ -133,7 +133,7 @@ export const TEACHERS: Teacher[] = [
     adultSupport: ["Functional Skills English & Maths", "Basic Literacy & Confidence Building"],
     emoji: "👩‍🏫",
     color: "from-amber-400 to-orange-500",
-    openaiVoice: "shimmer",
+    geminiVoice: "Kore",
     elevenLabsVoiceId: "9BWtsMINqrJLrRacOk9x",
     systemPrompt: `You are Lina, a warm and nurturing Primary Foundations Tutor specialising in KS1–KS2. You teach English (Phonics, Reading, Writing, Grammar), Mathematics, Science, History & Geography, PSHE & Citizenship, and Study Skills. You also support adults with Functional Skills English & Maths and Basic Literacy.
 
@@ -153,7 +153,7 @@ ${SHARED_TEACHING_FRAMEWORK}`,
     adultSupport: ["Professional English", "Arabic for Work, Faith & Travel", "Communication Skills"],
     emoji: "👩‍💼",
     color: "from-teal-400 to-emerald-500",
-    openaiVoice: "nova",
+    geminiVoice: "Aoede",
     elevenLabsVoiceId: "OYTbf65OHHFELVut7v2H",
     systemPrompt: `You are Zahra, a knowledgeable and articulate English, Languages & Ethics Tutor specialising in KS2–KS4. You teach English Language & Literature, Religious Studies, Citizenship & PSHE, A Level, and Health & Social Care. You're also an expert in Arabic (beginner to advanced) and ESOL/IELTS preparation.
 
@@ -173,7 +173,7 @@ ${SHARED_TEACHING_FRAMEWORK}`,
     adultSupport: ["Coding for Beginners", "Data & Technical Literacy", "STEM Career Foundations"],
     emoji: "👨‍🔬",
     color: "from-blue-400 to-indigo-500",
-    openaiVoice: "echo",
+    geminiVoice: "Puck",
     elevenLabsVoiceId: "ewxUvnyvvOehYjKjUVKC",
     systemPrompt: `You are Hank, a sharp and methodical STEM & Exam Specialist for KS3–KS4. You teach Mathematics, Further Maths, Physics, Chemistry, and Computer Science at GCSE level. You also support adults with Coding for Beginners, Data & Technical Literacy, and STEM Career Foundations.
 
@@ -193,7 +193,7 @@ ${SHARED_TEACHING_FRAMEWORK}`,
     adultSupport: ["Entrepreneurship", "Digital Productivity (Excel, Docs, AI)", "Career Planning & Interview Skills"],
     emoji: "👨‍💼",
     color: "from-violet-400 to-purple-500",
-    openaiVoice: "onyx",
+    geminiVoice: "Charon",
     elevenLabsVoiceId: "qy3uP381xz2uje6kNLCG",
     systemPrompt: `You are Mark, a practical and business-savvy Business, Computing & Media Tutor for KS4. You teach Business Studies, Economics, ICT & Computer Science, Media Studies, Financial Literacy, A Level, and Health & Social Care. You support adults with Entrepreneurship, Digital Productivity, and Career Planning & Interview Skills.
 
@@ -213,7 +213,7 @@ ${SHARED_TEACHING_FRAMEWORK}`,
     adultSupport: ["Personal Development & Wellbeing", "Critical Thinking", "Lifelong Learning Skills"],
     emoji: "👩‍🎨",
     color: "from-rose-400 to-pink-500",
-    openaiVoice: "alloy",
+    geminiVoice: "Leda",
     elevenLabsVoiceId: "EIsgvJT3rwoPvRFG6c4n",
     systemPrompt: `You are Kate, a creative and empathetic Humanities, Creative & Wellbeing Tutor for KS2–KS4. You teach History, Geography, Sociology, Psychology, Art & Creative Writing, PE Theory, A Levels, and Health & Social Care. You support adults with Personal Development & Wellbeing, Critical Thinking, and Lifelong Learning Skills.
 

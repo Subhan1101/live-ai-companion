@@ -1,6 +1,6 @@
 // Audio recording utilities for OpenAI Realtime API
 // Target sample rate for OpenAI Realtime API
-const TARGET_SAMPLE_RATE = 24000;
+const TARGET_SAMPLE_RATE = 16000;
 
 export class AudioRecorder {
   private stream: MediaStream | null = null;

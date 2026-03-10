@@ -39,7 +39,7 @@ const Index = () => {
     showWhiteboard,
     openWhiteboard,
     closeWhiteboard,
-  } = useRealtimeChat(selectedTeacher?.openaiVoice, selectedTeacher?.systemPrompt, selectedTeacher?.elevenLabsVoiceId);
+  } = useRealtimeChat(selectedTeacher?.geminiVoice, selectedTeacher?.systemPrompt, selectedTeacher?.elevenLabsVoiceId);
 
   const {
     isSharing,

@@ -1,135 +1,77 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const getOpenAIApiKey = () => {
-  const raw = Deno.env.get("OPENAI_API_KEY") ?? "";
-  let key = raw.trim();
+const GEMINI_MODEL = "gemini-2.0-flash-exp";
 
-  // Common copy/paste mistakes: quotes or "Bearer " prefix
+const getGeminiApiKey = () => {
+  const raw = Deno.env.get("GEMINI_API_KEY") ?? "";
+  let key = raw.trim();
   if (
     (key.startsWith('"') && key.endsWith('"')) ||
     (key.startsWith("'") && key.endsWith("'"))
   ) {
     key = key.slice(1, -1).trim();
   }
-
-  if (key.toLowerCase().startsWith("bearer ")) {
-    key = key.slice("bearer ".length).trim();
-  }
-
   return key;
 };
 
-// IMPORTANT: Use the exact Realtime endpoint required by the app
-const OPENAI_REALTIME_URL =
-  "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
-
 serve(async (req) => {
-  // Handle WebSocket upgrade
   const upgrade = req.headers.get("upgrade") || "";
-
   if (upgrade.toLowerCase() !== "websocket") {
     return new Response("Expected WebSocket upgrade", { status: 426 });
   }
 
-  const apiKey = getOpenAIApiKey();
+  const apiKey = getGeminiApiKey();
   if (!apiKey) {
-    console.error("OPENAI_API_KEY is not configured (or empty after trimming)");
+    console.error("GEMINI_API_KEY is not configured");
     return new Response("Server configuration error", { status: 500 });
   }
 
-  // Don't log secrets; log only safe metadata
-  console.log("Realtime proxy starting", {
-    keyLength: apiKey.length,
-    looksLikeSk: apiKey.startsWith("sk-"),
-  });
+  console.log("Gemini Live proxy starting", { keyLength: apiKey.length });
 
   const { socket: clientSocket, response } = Deno.upgradeWebSocket(req);
 
-  let openaiSocket: WebSocket | null = null;
-
-  let keepaliveInterval: number | null = null;
+  let geminiSocket: WebSocket | null = null;
 
   clientSocket.onopen = () => {
-    console.log("Client connected, establishing connection to OpenAI...");
+    console.log("Client connected, establishing connection to Gemini Live API...");
 
-    // Connect to OpenAI Realtime API
-    openaiSocket = new WebSocket(OPENAI_REALTIME_URL, [
-      "realtime",
-      `openai-insecure-api-key.${apiKey}`,
-      "openai-beta.realtime-v1",
-    ]);
+    const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
 
-    openaiSocket.onopen = () => {
-      console.log("Connected to OpenAI Realtime API", { url: OPENAI_REALTIME_URL });
+    geminiSocket = new WebSocket(geminiUrl);
+
+    geminiSocket.onopen = () => {
+      console.log("Connected to Gemini Live API");
       if (clientSocket.readyState === WebSocket.OPEN) {
-        clientSocket.send(JSON.stringify({ type: "proxy.openai_connected" }));
+        clientSocket.send(JSON.stringify({ type: "proxy.gemini_connected" }));
       }
-      
-      // Start keepalive ping to OpenAI every 12 seconds
-      // Send valid PCM16 silence (480 samples = 20ms at 24kHz = 960 bytes)
-      keepaliveInterval = setInterval(() => {
-        if (openaiSocket?.readyState === WebSocket.OPEN) {
-          // Create 960 bytes of silence (480 PCM16 samples)
-          const silenceBuffer = new Uint8Array(960);
-          // Convert to base64 using Deno's btoa
-          const base64Silence = btoa(String.fromCharCode(...silenceBuffer));
-          openaiSocket.send(JSON.stringify({
-            type: "input_audio_buffer.append",
-            audio: base64Silence
-          }));
-          console.log("Keepalive ping sent to OpenAI");
-        }
-      }, 12000);
     };
 
-    openaiSocket.onmessage = (event) => {
-      // Forward OpenAI messages to client
+    geminiSocket.onmessage = (event) => {
       if (clientSocket.readyState === WebSocket.OPEN) {
+        // Forward raw Gemini messages to client
         clientSocket.send(event.data);
       }
     };
 
-    openaiSocket.onerror = (error) => {
-      console.error("OpenAI WebSocket error:", error);
+    geminiSocket.onerror = (error) => {
+      console.error("Gemini WebSocket error:", error);
       if (clientSocket.readyState === WebSocket.OPEN) {
         clientSocket.send(
           JSON.stringify({
             type: "proxy.error",
-            message: "OpenAI websocket error",
+            message: "Gemini websocket error",
           })
         );
       }
     };
 
-    openaiSocket.onclose = (event) => {
-      console.log("OpenAI connection closed:", event.code, event.reason);
-
-      // Clear keepalive interval
-      if (keepaliveInterval) {
-        clearInterval(keepaliveInterval);
-        keepaliveInterval = null;
-      }
-
-      // Surface common auth failures explicitly to the client
-      const reason = String(event.reason ?? "");
-      const looksLikeInvalidKey =
-        event.code === 3000 && reason.toLowerCase().includes("invalid_api_key");
+    geminiSocket.onclose = (event) => {
+      console.log("Gemini connection closed:", event.code, event.reason);
 
       if (clientSocket.readyState === WebSocket.OPEN) {
-        if (looksLikeInvalidKey) {
-          clientSocket.send(
-            JSON.stringify({
-              type: "proxy.error",
-              message: "OpenAI rejected the API key (invalid or missing Realtime access)",
-              code: event.code,
-              reason: event.reason,
-            })
-          );
-        }
-
         clientSocket.send(
           JSON.stringify({
-            type: "proxy.openai_closed",
+            type: "proxy.gemini_closed",
             code: event.code,
             reason: event.reason,
           })
@@ -140,9 +82,9 @@ serve(async (req) => {
   };
 
   clientSocket.onmessage = (event) => {
-    // Forward client messages to OpenAI
-    if (openaiSocket && openaiSocket.readyState === WebSocket.OPEN) {
-      openaiSocket.send(event.data);
+    // Forward client messages to Gemini
+    if (geminiSocket && geminiSocket.readyState === WebSocket.OPEN) {
+      geminiSocket.send(event.data);
     }
   };
 
@@ -152,13 +94,9 @@ serve(async (req) => {
 
   clientSocket.onclose = () => {
     console.log("Client disconnected");
-    if (keepaliveInterval) {
-      clearInterval(keepaliveInterval);
-      keepaliveInterval = null;
-    }
-    if (openaiSocket) {
-      openaiSocket.close();
-      openaiSocket = null;
+    if (geminiSocket) {
+      geminiSocket.close();
+      geminiSocket = null;
     }
   };
 
