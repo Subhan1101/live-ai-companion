@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const GEMINI_MODEL = "gemini-2.5-flash-live-preview";
+const GEMINI_MODEL = "gemini-live-2.5-flash-preview";
 
 const getGeminiApiKey = () => {
   const raw = Deno.env.get("GEMINI_API_KEY") ?? "";
