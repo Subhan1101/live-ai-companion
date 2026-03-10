@@ -1,44 +1,66 @@
 
 
-## Plan: Voice-Controlled Teacher Selection + Fix Whiteboard Chat Duplication
+## Plan: Migrate from OpenAI Realtime to Gemini Live API
 
-### Problem 1: Whiteboard Content Floods the Chat
+### Overview
 
-**Root cause identified**: When OpenAI sends audio responses, the transcript arrives via `response.audio_transcript.delta` events, which stream the FULL text (including `[WHITEBOARD_START]...[WHITEBOARD_END]` content) into the chat bubble character-by-character. The whiteboard cleanup code only runs in `response.text.done` (text-only mode), but audio mode uses `response.audio_transcript.done` which currently does nothing. So the entire explanation stays in chat, then appears again on the whiteboard.
+Complete replacement of OpenAI Realtime API with Google Gemini Multimodal Live API for all real-time voice, text, and audio functionality. This eliminates all OpenAI dependencies and uses Gemini's native bidirectional audio streaming, VAD (voice activity detection), TTS, and STT.
 
-**Fix in `src/hooks/useRealtimeChat.ts`**:
-- In `response.audio_transcript.delta`: detect when whiteboard markers start appearing and suppress that content from the chat message. Only show the pre-marker text in the chat bubble.
-- In `response.audio_transcript.done`: add the same whiteboard extraction + cleanup logic that exists in `response.text.done` — strip markers from chat, store `originalContent`, and set a short summary like "I've prepared a detailed explanation. Click 'Whiteboard' to view."
+### Key Architectural Differences
 
-### Problem 2: Voice-Controlled Teacher Selection
+```text
+CURRENT (OpenAI Realtime)                    NEW (Gemini Live API)
+─────────────────────────                    ─────────────────────
+wss://api.openai.com/v1/realtime             wss://generativelanguage.googleapis.com/ws/...BidiGenerateContent
+Auth: WebSocket subprotocol headers           Auth: ?key=API_KEY in URL
+session.created → session.update              { setup: {...} } → setupComplete
+input_audio_buffer.append (24kHz PCM16)       realtimeInput.audio (16kHz PCM16)
+response.audio.delta (24kHz PCM16 out)        serverContent.modelTurn.parts[].inlineData (24kHz PCM16 out)
+response.audio_transcript.delta               serverContent.outputTranscription.text
+conversation.item.input_audio_transcription   serverContent.inputTranscription.text
+server_vad (turn_detection)                   automaticActivityDetection (built-in)
+Voices: shimmer, nova, echo, onyx, alloy      Voices: Kore, Aoede, Puck, Charon, Leda
+```
 
-Add voice navigation to the `TeacherSelect` screen so visually impaired or hands-free users can choose a teacher by speaking.
+### Secret Required
 
-**New file: `src/hooks/useVoiceNavigation.ts`**
-- Use the Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`) for browser-native speech-to-text (no API key needed)
-- Listen continuously on the teacher selection screen
-- Match recognized text against teacher names ("Lina", "Zahra", "Hank", "Mark", "Kate")
-- Return: `{ isListening, transcript, startListening, stopListening }`
+A **GEMINI_API_KEY** (Google AI API key from aistudio.google.com) must be added as a backend secret. The existing OPENAI_API_KEY will no longer be used by this function.
 
-**Updated: `src/components/TeacherSelect.tsx`**
-- On mount, play a TTS announcement using `SpeechSynthesis` API: "Welcome. You can choose a teacher by saying their name. Available teachers are: Lina for primary foundations, Zahra for English and ethics, Hank for STEM, Mark for business and tech, Kate for humanities and creative arts."
-- Use the `useVoiceNavigation` hook to listen for teacher name mentions
-- When a name is matched, highlight the card and auto-select after a short delay
-- Show a small "Listening..." indicator and the recognized transcript on screen
-- Add a microphone button to toggle voice control on/off
+### Voice Mapping
 
-### Problem 3: More Natural Teacher Personality
-
-**Updated: `src/lib/teachers.ts`**
-- Revise the greeting lines to be warmer and more conversational (e.g., "Hi there! I'm Lina, lovely to meet you! What would you like to learn today?")
-- Add to `SHARED_TEACHING_FRAMEWORK`: instructions to ask the student's name at the start and use it naturally throughout the conversation, making interactions feel personal rather than robotic
+| Teacher | OpenAI Voice | Gemini Voice | Rationale |
+|---------|-------------|-------------|-----------|
+| Lina    | shimmer     | Kore        | Warm, nurturing female |
+| Zahra   | nova        | Aoede       | Articulate, professional female |
+| Hank    | echo        | Puck        | Energetic male |
+| Mark    | onyx        | Charon      | Deep, confident male |
+| Kate    | alloy       | Leda        | Creative, empathetic female |
 
 ### Files Changed
 
 | File | Change |
 |------|--------|
-| `src/hooks/useRealtimeChat.ts` | Fix whiteboard content in `audio_transcript.delta` and `audio_transcript.done` |
-| `src/hooks/useVoiceNavigation.ts` | New hook for Web Speech API voice recognition |
-| `src/components/TeacherSelect.tsx` | Add voice-controlled teacher selection with TTS announcement |
-| `src/lib/teachers.ts` | Make greetings more natural, add "ask student's name" instruction |
+| `supabase/functions/realtime-chat/index.ts` | Complete rewrite: proxy to Gemini Live API instead of OpenAI. Auth via GEMINI_API_KEY. Different WebSocket URL, no subprotocol auth. Forward setup message with model/voice/instructions, relay audio/text bidirectionally. Handle `goAway` for graceful reconnect. |
+| `src/hooks/useRealtimeChat.ts` | Complete rewrite of message handling. Replace all OpenAI event types (`session.created`, `response.audio.delta`, etc.) with Gemini events (`setupComplete`, `serverContent`, `inputTranscription`, `outputTranscription`, `turnComplete`, `interrupted`). Change audio input format from 24kHz to 16kHz. Send audio via `realtimeInput.audio` instead of `input_audio_buffer.append`. Send text via `clientContent.turns` instead of `conversation.item.create`. Images via `realtimeInput` or `clientContent`. Setup message includes model, voice, system instruction. |
+| `src/lib/teachers.ts` | Replace `OpenAIVoice` type with `GeminiVoice`. Change voice values to Gemini voices (Kore, Aoede, Puck, Charon, Leda). Rename `openaiVoice` field to `geminiVoice`. |
+| `src/lib/audioUtils.ts` | Change `TARGET_SAMPLE_RATE` from 24000 to 16000 (Gemini input is 16kHz). |
+| `src/pages/Index.tsx` | Update `openaiVoice` references to `geminiVoice`. |
+| `supabase/config.toml` | No change needed (realtime-chat already has verify_jwt = false). |
+
+### Audio Pipeline Change
+
+- **Input**: Mic → 16kHz PCM16 (was 24kHz) → base64 → `{ realtimeInput: { audio: { data, mimeType: "audio/pcm;rate=16000" } } }`
+- **Output**: Gemini sends 24kHz PCM16 in `serverContent.modelTurn.parts[].inlineData.data` → decode base64 → resample 24kHz→16kHz → Simli lip-sync (same as before for output)
+
+### What Gets Removed
+
+- All OpenAI-specific event handling (30+ event types)
+- OpenAI WebSocket subprotocol authentication
+- Whisper-1 STT references (Gemini has built-in transcription)
+- ElevenLabs TTS pipeline (Gemini provides native TTS audio; ElevenLabs edge function stays but won't be called)
+- OpenAI heartbeat/keepalive logic (Gemini has different session management with `goAway`)
+
+### Session Management
+
+Gemini Live API sends a `goAway` message with `timeLeft` before disconnecting. This replaces the current proactive reconnect timer (85s warning, 110s reconnect). The proxy will forward `goAway` to the client, and the client will initiate reconnection based on that signal.
 
