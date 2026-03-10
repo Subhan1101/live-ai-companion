@@ -35,7 +35,7 @@ serve(async (req) => {
   clientSocket.onopen = () => {
     console.log("Client connected, establishing connection to Gemini Live API...");
 
-    const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+    const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
 
     geminiSocket = new WebSocket(geminiUrl);
 
