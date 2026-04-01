@@ -38,6 +38,9 @@ const WaveformVisualizer = ({ audioLevel, isActive }: { audioLevel: number; isAc
   );
 };
 
+// Cache the API key at the module level so we don't spam the edge function on reconnects
+let cachedSimliKey: string | null = null;
+
 export const AvatarPanel = ({
   faceId,
   teacherName,
@@ -57,8 +60,6 @@ export const AvatarPanel = ({
   const [simliError, setSimliError] = useState<string | null>(null);
 
   // FIX: Store onSimliReady in a ref so it never causes the effect to re-run.
-  // Without this, every parent re-render recreates the callback → triggers Simli
-  // teardown + re-init in an infinite loop.
   const onSimliReadyRef = useRef(onSimliReady);
   useEffect(() => {
     onSimliReadyRef.current = onSimliReady;
@@ -84,17 +85,24 @@ export const AvatarPanel = ({
         setSimliError(null);
         console.log("Initializing Simli with face:", faceId);
 
-        // Fetch API key from backend function
-        const { data, error } = await supabase.functions.invoke("simli-token");
+        let apiKey = cachedSimliKey;
 
-        if (error) {
-          throw new Error(error.message || "Failed to get Simli token");
-        }
-
-        const apiKey = (data as any)?.apiKey as string | undefined;
-
+        // Fetch API key from backend function if we don't have it cached
         if (!apiKey) {
-          throw new Error("No API key returned from simli-token function. Check SIMLI_API_KEY secret in Supabase.");
+          const { data, error } = await supabase.functions.invoke("simli-token");
+          
+          if (error) {
+            throw new Error(error.message || "Failed to get Simli token from Edge Function");
+          }
+          
+          apiKey = (data as any)?.apiKey as string | undefined;
+          
+          if (!apiKey) {
+            throw new Error("No API key returned from simli-token function. Check SIMLI_API_KEY secret in Supabase.");
+          }
+          
+          // Cache it for future reconnects
+          cachedSimliKey = apiKey;
         }
 
         // Wait for video element to be available

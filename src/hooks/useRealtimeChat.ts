@@ -49,12 +49,9 @@ const RECONNECT_BASE_DELAY = 1000;
 const cleanDisplayContent = (text: string) => {
   if (!text) return "";
 
-  // The gemini-2.5-flash-native-audio-preview model structurally hallucinates debug "internal thoughts"
-  // into the text modality instead of the transcribed text. Because it is an allowlisted preview model, 
-  // it ignores XML/HTML formatting constraints. 
-  // We MUST replace its text output with an incredibly clear Visual Audio Badge so the user knows 
-  // it is functioning perfectly as a Voice Agent, rather than confusing them with raw CoT logs.
-  return "🔊 Audio Response";
+  // Simply return the transcribed text, stripping out whiteboard metadata blocks
+  // to prevent raw LaTeX/markdown leaking into the chat bubble
+  return removeWhiteboardMarkers(text);
 };
 
 export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: string, elevenLabsVoiceId?: string): UseRealtimeChatReturn => {
@@ -98,6 +95,9 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
   // Track current assistant message being streamed
   const currentAssistantIdRef = useRef<string | null>(null);
   const currentAssistantTextRef = useRef("");
+
+  const lastActivityRef = useRef<number>(Date.now());
+  const monitoringTimerRef = useRef<number | null>(null);
 
   // Keep refs in sync with props
   useEffect(() => { teacherVoiceRef.current = teacherVoice; }, [teacherVoice]);
@@ -284,7 +284,14 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
       if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
         audioContextRef.current = new AudioContext({ sampleRate: 24000 });
       }
-      audioQueueRef.current = new AudioQueue(audioContextRef.current);
+      
+      // Preserve the same AudioQueue across reconnects to maintain the unbroken 
+      // MediaStream track that powers the Simli avatar's lip-sync video feed.
+      if (!audioQueueRef.current) {
+        audioQueueRef.current = new AudioQueue(audioContextRef.current);
+      } else {
+        audioQueueRef.current.clear(); // Clear old residual audio
+      }
 
       // Give Simli the real-time audio track early if it's already listening
       if (simliListenToTrackRef.current && audioQueueRef.current.destination.stream.getAudioTracks().length > 0) {
@@ -336,7 +343,12 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                   inputAudioTranscription: {},
                   systemInstruction: {
                     parts: [{
-                      text: teacherInstructionsRef.current || "You are EduGuide, a helpful AI teacher. Answer educational questions clearly and concisely.",
+                      text: (teacherInstructionsRef.current || "You are EduGuide, a helpful AI teacher.") + 
+                        "\n\nINTERACTIVITY RULES:\n" +
+                        "1. You are in a LIVE voice session. Be proactive.\n" +
+                        "2. If the student is silent, check in on them. Ask if they are stuck or if they need you to explain something in a different way.\n" +
+                        "3. Use short, conversational phrases. Avoid long monologues unless asked.\n" +
+                        "4. Always conclude your turns with a brief, encouraging question to keep the conversation moving.",
                     }],
                   },
                 },
@@ -445,6 +457,8 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
 
             // serverContent - model output (audio, text, transcription)
             if (data.serverContent) {
+              // Reset silence timer on any server activity
+              lastActivityRef.current = Date.now();
               const sc = data.serverContent;
 
               // Input transcription (what the user said)
@@ -472,7 +486,33 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                   });
                   setPartialTranscript("");
                 }
-                return;
+              }
+
+              // Output transcription (what the model said - audio transcript)
+              const outputTranscriptChunk = sc.outputTranscription?.text ?? sc.output_audio_transcription?.text;
+              if (outputTranscriptChunk) {
+                console.log("Model output transcript:", outputTranscriptChunk);
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  if (last?.role === "assistant" && currentAssistantIdRef.current === last.id) {
+                     const currentTranscript = last.rawTranscription || "";
+                     const newTranscript = currentTranscript + outputTranscriptChunk;
+                     return prev.map((m, i) =>
+                       i === prev.length - 1 ? { ...m, content: newTranscript, rawTranscription: newTranscript } : m
+                     );
+                  }
+                  
+                  const newId = crypto.randomUUID();
+                  currentAssistantIdRef.current = newId;
+                  return [...prev, {
+                     id: newId,
+                     role: "assistant",
+                     content: outputTranscriptChunk,
+                     rawTranscription: outputTranscriptChunk,
+                     originalContent: "",
+                     timestamp: new Date()
+                  }];
+                });
               }
 
               // Model turn - contains audio and/or text parts
@@ -512,9 +552,13 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                         const newOriginalContent = rawContent + part.text;
                         currentAssistantTextRef.current = newOriginalContent;
 
-                        const displayContent = cleanDisplayContent(newOriginalContent);
                         return prev.map((m, i) =>
-                          i === prev.length - 1 ? { ...m, content: displayContent, originalContent: newOriginalContent } : m
+                          i === prev.length - 1 ? { 
+                            ...m, 
+                            originalContent: newOriginalContent,
+                            // If we don't have a transcript yet, show thinking indicator so CoT doesn't bleed through
+                            content: m.rawTranscription ? m.rawTranscription : "🔊 Speaking..."
+                          } : m
                         );
                       }
                       
@@ -522,26 +566,30 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                       const newId = crypto.randomUUID();
                       currentAssistantIdRef.current = newId;
                       currentAssistantTextRef.current = part.text;
-                      const displayContent = cleanDisplayContent(part.text);
                       return [...prev, {
                         id: newId,
                         role: "assistant" as const,
-                        content: displayContent,
+                        content: "🔊 Speaking...",
                         originalContent: part.text,
+                        rawTranscription: "",
                         timestamp: new Date(),
                       }];
                     });
                   }
                 }
-                return;
               }
             }
 
             // Log unhandled
-            console.log("Unhandled Gemini event:", JSON.stringify(data).substring(0, 200));
+            // console.log("Unhandled Gemini event:", JSON.stringify(data).substring(0, 200));
 
           } catch (e) {
             console.error("Error parsing Gemini message:", e);
+            toast({
+              title: "Gemini Parsing Error",
+              description: e instanceof Error ? e.message : "Unknown error",
+              variant: "destructive"
+            });
           }
         };
 
@@ -625,6 +673,44 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
     setIsRecording(false);
     setStatus("idle");
   }, []);
+
+  // Silence Monitoring Effect
+  useEffect(() => {
+    if (!isConnected || isReconnecting) {
+      if (monitoringTimerRef.current) {
+        window.clearInterval(monitoringTimerRef.current);
+        monitoringTimerRef.current = null;
+      }
+      return;
+    }
+
+    console.log("[Silence Monitor] Started");
+    monitoringTimerRef.current = window.setInterval(() => {
+      const idleTime = Date.now() - lastActivityRef.current;
+      
+      // If user is silent for 45s, send a hidden nudge
+      if (idleTime > 45000 && wsRef.current?.readyState === WebSocket.OPEN) {
+        console.log("[Silence Monitor] User silent for 45s, nudging AI...");
+        lastActivityRef.current = Date.now(); // Reset to prevent spamming
+        
+        wsRef.current.send(JSON.stringify({
+          clientContent: {
+            turns: [{
+              role: "user",
+              parts: [{ text: "[SYSTEM: The student has been silent for a while. Please check in with them proactively, ask if they have questions about what you just said, or if they'd like to move to the next topic.]" }],
+            }],
+            turnComplete: true,
+          },
+        }));
+      }
+    }, 5000);
+
+    return () => {
+      if (monitoringTimerRef.current) {
+        window.clearInterval(monitoringTimerRef.current);
+      }
+    };
+  }, [isConnected, isReconnecting]);
 
   // Cleanup on unmount
   useEffect(() => {
