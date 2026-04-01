@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState } from "react";
-import { Mic } from "lucide-react";
-import { SimliClient } from "simli-client";
+import { useRef, useEffect, useState, useCallback } from "react";
+import { Mic, RefreshCw } from "lucide-react";
+import * as Simli from "simli-client";
 import { supabase } from "@/integrations/supabase/client";
 
 interface AvatarPanelProps {
@@ -13,7 +13,7 @@ interface AvatarPanelProps {
   audioLevel: number;
   isConnected: boolean;
   isReconnecting?: boolean;
-  onSimliReady?: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
+  onSimliReady?: (listenToTrack: (track: MediaStreamTrack) => void, clearBuffer: () => void) => void;
 }
 
 const WaveformVisualizer = ({ audioLevel, isActive }: { audioLevel: number; isActive: boolean }) => {
@@ -52,65 +52,39 @@ export const AvatarPanel = ({
 }: AvatarPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const simliClientRef = useRef<SimliClient | null>(null);
+  const simliClientRef = useRef<Simli.SimliClient | null>(null);
   const [isSimliReady, setIsSimliReady] = useState(false);
   const [simliError, setSimliError] = useState<string | null>(null);
 
-  // Initialize Simli client when connected
+  // FIX: Store onSimliReady in a ref so it never causes the effect to re-run.
+  // Without this, every parent re-render recreates the callback → triggers Simli
+  // teardown + re-init in an infinite loop.
+  const onSimliReadyRef = useRef(onSimliReady);
   useEffect(() => {
-    // Only initialize when connected, but DON'T tear down during reconnects
-    if (!isConnected) {
-      // Skip cleanup if we're just reconnecting - keep avatar alive
-      if (isReconnecting) {
-        console.log("Skipping Simli cleanup during reconnect");
-        return;
-      }
-      // Clean up when fully disconnected (not reconnecting)
-      if (simliClientRef.current) {
-        console.log("Cleaning up Simli client on disconnect");
-        simliClientRef.current.close();
-        simliClientRef.current = null;
-        setIsSimliReady(false);
-      }
-      return;
-    }
+    onSimliReadyRef.current = onSimliReady;
+  }, [onSimliReady]);
 
-    // If Simli is already initialized and ready, don't reinitialize on reconnect
-    if (simliClientRef.current && isSimliReady) {
-      console.log("Simli already active, skipping re-initialization on reconnect");
-      // Re-provide audio handler to parent in case it was lost
-      if (onSimliReady) {
-        onSimliReady(
-          (audioData: Uint8Array) => {
-            if (simliClientRef.current) {
-              simliClientRef.current.sendAudioData(audioData);
-            }
-          },
-          () => {
-            if (simliClientRef.current) {
-              simliClientRef.current.ClearBuffer();
-            }
-          }
-        );
-      }
-      return;
-    }
-
+  const initSimli = useCallback(async () => {
     let isMounted = true;
-    
-    const initSimli = async () => {
+
+    const run = async () => {
       try {
         // Close any existing session first
         if (simliClientRef.current) {
           console.log("Closing existing Simli session before reinit");
-          simliClientRef.current.close();
+          try {
+            simliClientRef.current.stop();
+          } catch (e) {
+            console.warn("Simli stop error:", e);
+          }
           simliClientRef.current = null;
           setIsSimliReady(false);
         }
-        
+
+        setSimliError(null);
         console.log("Initializing Simli with face:", faceId);
-        
-        // Fetch API key from backend function (using the client SDK avoids CORS/URL issues)
+
+        // Fetch API key from backend function
         const { data, error } = await supabase.functions.invoke("simli-token");
 
         if (error) {
@@ -118,9 +92,9 @@ export const AvatarPanel = ({
         }
 
         const apiKey = (data as any)?.apiKey as string | undefined;
-        
+
         if (!apiKey) {
-          throw new Error("No API key returned");
+          throw new Error("No API key returned from simli-token function. Check SIMLI_API_KEY secret in Supabase.");
         }
 
         // Wait for video element to be available
@@ -131,45 +105,70 @@ export const AvatarPanel = ({
 
         if (!isMounted) return;
 
-        // Create a fresh Simli client instance
-        const simliClient = new SimliClient();
-        
-        // Initialize with the correct face ID
-        simliClient.Initialize({
-          apiKey: apiKey,
-          faceID: faceId,
-          handleSilence: true,
+        // Create the session request configuration
+        const sessionRequest = {
+          faceId: faceId,
+          handleSilence: false,
           maxSessionLength: 3600,
-          maxIdleTime: 600,
-          videoRef: videoRef.current,
-          audioRef: audioRef.current,
-          session_token: "",
-          SimliURL: "",
-          maxRetryAttempts: 3,
-          retryDelay_ms: 2000,
-          videoReceivedTimeout: 15000,
-          enableSFU: true,
-          model: "fasttalk",
-          enableConsoleLogs: false,
+          maxIdleTime: 3600, // Increased to 1 hour to prevent 10-minute idle freeze
+          model: "fasttalk" as const,
+        };
+
+        // Generate the session token
+        const sessionTokenResponse = await Simli.generateSimliSessionToken({
+          apiKey: apiKey,
+          config: sessionRequest,
         });
+
+        // Create a fresh Simli client instance using v3 API
+        // Signature: (session_token, videoElement, audioElement, iceServers, logLevel, transport_mode)
+        const simliClient = new Simli.SimliClient(
+          sessionTokenResponse.session_token,
+          videoRef.current,
+          audioRef.current,
+          null, // undefined/null iceServers
+          Simli.LogLevel.DEBUG,
+          "livekit" // explicitly set 'livekit' instead of default 'p2p'
+        );
 
         simliClientRef.current = simliClient;
 
+        // Bind failure listeners before starting
+        (simliClient as any).on?.("disconnected", () => {
+          console.warn("Simli disconnected unexpectedly!");
+          if (isMounted) {
+            setIsSimliReady(false);
+            setSimliError("Avatar connection lost");
+          }
+        });
+        (simliClient as any).on?.("failed", () => {
+          console.warn("Simli failed to connect!");
+          if (isMounted) {
+            setIsSimliReady(false);
+            setSimliError("Avatar stream failed");
+          }
+        });
+
         // Start the Simli session
         await simliClient.start();
-        
+
         if (!isMounted) {
-          simliClient.close();
+          try {
+            simliClient.stop();
+          } catch (e) {
+            console.warn("Simli stop error:", e);
+          }
           return;
         }
-        
+
         console.log("Simli client started, waiting for video frames...");
 
-        const sendAudio = (audioData: Uint8Array) => {
+        const listenToTrack = (track: MediaStreamTrack) => {
           if (simliClientRef.current) {
-            simliClientRef.current.sendAudioData(audioData);
+            simliClientRef.current.listenToMediastreamTrack(track);
           }
         };
+        
         const clearBuffer = () => {
           if (simliClientRef.current) {
             simliClientRef.current.ClearBuffer();
@@ -183,8 +182,8 @@ export const AvatarPanel = ({
           console.log("Simli video playing — signaling ready with face:", faceId);
           setIsSimliReady(true);
           setSimliError(null);
-          if (onSimliReady) {
-            onSimliReady(sendAudio, clearBuffer);
+          if (onSimliReadyRef.current) {
+            onSimliReadyRef.current(listenToTrack, clearBuffer);
           }
         };
 
@@ -205,26 +204,81 @@ export const AvatarPanel = ({
       } catch (error) {
         console.error("Simli initialization error:", error);
         if (isMounted) {
-          setSimliError(error instanceof Error ? error.message : "Failed to initialize avatar");
+          const errorMessage = error instanceof Error 
+            ? error.message 
+            : typeof error === "string" 
+              ? error 
+              : "Failed to initialize avatar";
+          setSimliError(errorMessage);
         }
       }
     };
 
-    // Small delay to ensure refs are ready
-    const timer = setTimeout(initSimli, 500);
+    run();
 
     return () => {
       isMounted = false;
-      clearTimeout(timer);
     };
-  }, [isConnected, isReconnecting, onSimliReady]);
+  }, [faceId]);
+
+  // Initialize Simli client when connected
+  useEffect(() => {
+    // Only initialize when connected, but DON'T tear down during reconnects
+    if (!isConnected) {
+      // Skip cleanup if we're just reconnecting - keep avatar alive
+      if (isReconnecting) {
+        console.log("Skipping Simli cleanup during reconnect");
+        return;
+      }
+      // Clean up when fully disconnected (not reconnecting)
+      if (simliClientRef.current) {
+        console.log("Cleaning up Simli client on disconnect");
+        try {
+          simliClientRef.current.stop();
+        } catch (e) {
+          console.warn("Simli stop error:", e);
+        }
+        simliClientRef.current = null;
+        setIsSimliReady(false);
+      }
+      return;
+    }
+
+    // If Simli is already initialized and ready, don't reinitialize on reconnect
+    if (simliClientRef.current && isSimliReady) {
+      console.log("Simli already active, skipping re-initialization on reconnect");
+      // Re-provide audio handler to parent in case it was lost
+      if (onSimliReadyRef.current) {
+        onSimliReadyRef.current(
+          (track: MediaStreamTrack) => {
+            if (simliClientRef.current) {
+              simliClientRef.current.listenToMediastreamTrack(track);
+            }
+          },
+          () => {
+            if (simliClientRef.current) {
+              simliClientRef.current.ClearBuffer();
+            }
+          }
+        );
+      }
+      return;
+    }
+
+    // Small delay to ensure refs are ready
+    const timer = setTimeout(initSimli, 500);
+    return () => clearTimeout(timer);
+
+    // NOTE: onSimliReady intentionally excluded — stored in ref to avoid re-init loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, isReconnecting, initSimli]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       try {
         if (simliClientRef.current) {
-          simliClientRef.current.close();
+          simliClientRef.current.stop();
         }
       } catch (e) {
         console.warn("Simli cleanup error (safe to ignore):", e);
@@ -232,6 +286,13 @@ export const AvatarPanel = ({
       simliClientRef.current = null;
     };
   }, []);
+
+  const handleRetry = useCallback(() => {
+    if (!isConnected) return;
+    setSimliError(null);
+    setIsSimliReady(false);
+    initSimli();
+  }, [isConnected, initSimli]);
 
   const getStatusText = () => {
     switch (status) {
@@ -256,19 +317,32 @@ export const AvatarPanel = ({
           ref={videoRef}
           autoPlay
           playsInline
-          muted={false}
+          muted={true}
           className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${isSimliReady ? "opacity-100" : "opacity-0"}`}
           style={{ objectFit: 'cover' }}
         />
+        {/* FIX: audio must NOT be muted — this is what produces the avatar's voice */}
         <audio ref={audioRef} autoPlay className="hidden" />
-        
+
         {/* Loading/Error state overlay */}
         {!isSimliReady && (
           <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-amber-400 to-orange-500">
             {simliError ? (
-              <div className="text-center p-4">
-                <div className="w-12 h-12 mx-auto mb-4 rounded-full border-4 border-white/30 border-t-white animate-spin" />
-                <p className="text-white/80 text-sm">{simliError}</p>
+              <div className="text-center p-4 space-y-3">
+                <div className="w-12 h-12 mx-auto rounded-full border-4 border-white/30 flex items-center justify-center">
+                  <span className="text-white text-xl">⚠️</span>
+                </div>
+                <p className="text-white font-semibold text-sm">Avatar failed to load</p>
+                <p className="text-white/70 text-xs max-w-[200px] mx-auto">{simliError}</p>
+                {isConnected && (
+                  <button
+                    onClick={handleRetry}
+                    className="flex items-center gap-1.5 mx-auto px-4 py-2 rounded-full bg-white/20 hover:bg-white/30 text-white text-sm font-medium transition-all"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Retry
+                  </button>
+                )}
               </div>
             ) : (
               <div className="text-center">
@@ -293,8 +367,8 @@ export const AvatarPanel = ({
 
           {/* Mic indicator - shows when listening */}
           <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
-            isRecording 
-              ? "bg-status-listening/20 border-2 border-status-listening" 
+            isRecording
+              ? "bg-status-listening/20 border-2 border-status-listening"
               : "bg-white/10 border-2 border-white/20"
           }`}>
             <Mic className={`w-6 h-6 text-white ${isRecording ? "animate-pulse" : ""}`} />

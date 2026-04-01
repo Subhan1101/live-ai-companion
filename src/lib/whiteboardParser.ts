@@ -78,6 +78,7 @@ export function hasWhiteboardContent(text: string): boolean {
  * Extracts whiteboard content from between [WHITEBOARD_START] and [WHITEBOARD_END] markers
  */
 export function extractWhiteboardContent(text: string): { content: string; hasWhiteboard: boolean } {
+  if (!text) return { content: '', hasWhiteboard: false };
   const startMarker = '[WHITEBOARD_START]';
   const endMarker = '[WHITEBOARD_END]';
   
@@ -107,6 +108,7 @@ export function extractWhiteboardContent(text: string): { content: string; hasWh
  * Removes whiteboard markers from text for display in chat
  */
 export function removeWhiteboardMarkers(text: string): string {
+  if (!text) return '';
   const startMarker = '[WHITEBOARD_START]';
   const endMarker = '[WHITEBOARD_END]';
   
@@ -130,6 +132,7 @@ export function removeWhiteboardMarkers(text: string): string {
  * Handles: \(...\), \[...\], $$...$$, $...$
  */
 function normalizeLatexDelimiters(text: string): string {
+  if (!text) return "";
   // Convert \[...\] (display) to $$...$$
   let result = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => `$$${inner}$$`);
   
@@ -143,6 +146,7 @@ function normalizeLatexDelimiters(text: string): string {
  * Parses whiteboard content into structured sections
  */
 export function parseWhiteboardContent(content: string): ParsedWhiteboard {
+  if (!content) return { title: 'Solution', sections: [], rawContent: '' };
   // First normalize all LaTeX delimiters
   const normalizedContent = normalizeLatexDelimiters(content);
   const lines = normalizedContent.split('\n');
@@ -289,6 +293,7 @@ export function parseWhiteboardContent(content: string): ParsedWhiteboard {
  * Handles both $...$ and \(...\) delimiters
  */
 export function parseInlineLatex(text: string): Array<{ text: string; isLatex: boolean }> {
+  if (!text) return [];
   // First normalize any remaining \(...\) to $...$
   const normalizedText = normalizeLatexDelimiters(text);
   

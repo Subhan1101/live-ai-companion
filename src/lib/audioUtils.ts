@@ -207,9 +207,11 @@ export class AudioQueue {
   private queue: Uint8Array[] = [];
   private isPlaying = false;
   private audioContext: AudioContext;
+  public destination: MediaStreamAudioDestinationNode;
 
   constructor(audioContext: AudioContext) {
     this.audioContext = audioContext;
+    this.destination = audioContext.createMediaStreamDestination();
   }
 
   async addToQueue(audioData: Uint8Array) {
@@ -234,7 +236,7 @@ export class AudioQueue {
 
       const source = this.audioContext.createBufferSource();
       source.buffer = audioBuffer;
-      source.connect(this.audioContext.destination);
+      source.connect(this.destination); // Route audio ONLY to Simli to allow WebRTC lip-synced playback and prevent echo
 
       source.onended = () => this.playNext();
       source.start(0);

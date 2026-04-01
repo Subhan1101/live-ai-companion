@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const GEMINI_MODEL = "gemini-live-2.5-flash-preview";
+const GEMINI_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
 
 const getGeminiApiKey = () => {
   const raw = Deno.env.get("GEMINI_API_KEY") ?? "";
@@ -35,7 +35,7 @@ serve(async (req) => {
   clientSocket.onopen = () => {
     console.log("Client connected, establishing connection to Gemini Live API...");
 
-    const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+    const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
 
     geminiSocket = new WebSocket(geminiUrl);
 

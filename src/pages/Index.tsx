@@ -64,6 +64,7 @@ const Index = () => {
   });
   const screenCaptureIntervalRef = useRef<number | null>(null);
   const bslTogglePendingRef = useRef(false);
+  const hasGreetedRef = useRef(false);
   const lastBSLAssistantMessageIdRef = useRef<string | null>(null);
   const lastBSLContentLengthRef = useRef<number>(0);
 
@@ -80,9 +81,10 @@ const Index = () => {
   // Auto-connect after teacher is selected
   useEffect(() => {
     if (!selectedTeacher) return;
+    hasGreetedRef.current = false; // Reset greeting tracker for new teacher
     connect();
     return () => disconnect();
-  }, [selectedTeacher]);
+  }, [selectedTeacher, connect, disconnect]);
 
   // Prompt user to click microphone after connection is established
   useEffect(() => {
@@ -108,11 +110,16 @@ const Index = () => {
   }, [isConnected]);
 
   const handleSimliReady = useCallback(
-    (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => {
-      setSimliAudioHandler(sendAudio, clearBuffer);
+    (listenToTrack: (track: MediaStreamTrack) => void, clearBuffer: () => void) => {
+      setSimliAudioHandler(listenToTrack, clearBuffer);
       setIsAvatarReady(true);
-      // Trigger greeting now that avatar is visible and lip-syncing
-      sendGreeting();
+      
+      // Trigger greeting ONLY once per teacher session
+      if (!hasGreetedRef.current) {
+        hasGreetedRef.current = true;
+        sendGreeting();
+      }
+      
       toast({
         title: "Avatar Ready",
         description: "Simli avatar is now active and ready for conversation.",
@@ -398,7 +405,7 @@ const Index = () => {
   // Handle text message from TranscriptPanel
   const handleSendText = useCallback((text: string) => {
     if (!isConnected || !text.trim()) return;
-    sendTextContent(text, "Text Message");
+    sendTextContent(text);
     toast({
       title: "Message sent",
       description: `Sent: "${text}"`,

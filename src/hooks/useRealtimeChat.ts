@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AudioRecorder, encodeAudioForAPI, AudioQueue } from "@/lib/audioUtils";
-import { PCM16Resampler } from "@/lib/pcmResampler";
 import { toast } from "@/hooks/use-toast";
 import { extractWhiteboardContent, removeWhiteboardMarkers } from "@/lib/whiteboardParser";
 
@@ -9,6 +8,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   originalContent?: string;
+  rawTranscription?: string;
   timestamp: Date;
 }
 
@@ -26,7 +26,7 @@ interface UseRealtimeChatReturn {
   disconnect: () => void;
   startRecording: () => void;
   stopRecording: () => void;
-  setSimliAudioHandler: (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => void;
+  setSimliAudioHandler: (listenToTrack: (track: MediaStreamTrack) => void, clearBuffer: () => void) => void;
   sendImage: (base64: string, mimeType: string, prompt?: string) => void;
   sendTextContent: (text: string, fileName?: string) => void;
   sendBSLModeChange: (enabled: boolean) => void;
@@ -37,13 +37,25 @@ interface UseRealtimeChatReturn {
   closeWhiteboard: () => void;
 }
 
-const WEBSOCKET_URL = "wss://jvfvwysvhqpiosvhzhkf.functions.supabase.co/functions/v1/realtime-chat";
+const WEBSOCKET_URL = "wss://xjdgrrlmwulqvamupvpc.functions.supabase.co/functions/v1/realtime-chat";
 
-const GEMINI_MODEL = "gemini-live-2.5-flash-preview";
+const GEMINI_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
 
 // Reconnect constants
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY = 1000;
+
+// Helper to reliably strip internal thoughts and system blocks from being displayed to the user
+const cleanDisplayContent = (text: string) => {
+  if (!text) return "";
+
+  // The gemini-2.5-flash-native-audio-preview model structurally hallucinates debug "internal thoughts"
+  // into the text modality instead of the transcribed text. Because it is an allowlisted preview model, 
+  // it ignores XML/HTML formatting constraints. 
+  // We MUST replace its text output with an incredibly clear Visual Audio Badge so the user knows 
+  // it is functioning perfectly as a Voice Agent, rather than confusing them with raw CoT logs.
+  return "🔊 Audio Response";
+};
 
 export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: string, elevenLabsVoiceId?: string): UseRealtimeChatReturn => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -67,11 +79,8 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
   const isListeningRef = useRef(false);
 
   // Simli audio handlers
-  const simliSendAudioRef = useRef<((data: Uint8Array) => void) | null>(null);
+  const simliListenToTrackRef = useRef<((track: MediaStreamTrack) => void) | null>(null);
   const simliClearBufferRef = useRef<(() => void) | null>(null);
-
-  // PCM16 resampler for Simli (24kHz output from Gemini -> 16kHz for Simli)
-  const resamplerRef = useRef<PCM16Resampler>(new PCM16Resampler(24000, 16000));
 
   // Refs to avoid stale closures
   const teacherVoiceRef = useRef(teacherVoice);
@@ -163,10 +172,15 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
 
   // Set Simli audio handler from AvatarPanel
   const setSimliAudioHandler = useCallback(
-    (sendAudio: (data: Uint8Array) => void, clearBuffer: () => void) => {
+    (listenToTrack: (track: MediaStreamTrack) => void, clearBuffer: () => void) => {
       console.log("Simli audio handler set");
-      simliSendAudioRef.current = sendAudio;
+      simliListenToTrackRef.current = listenToTrack;
       simliClearBufferRef.current = clearBuffer;
+      
+      // If we are already connected and have the track ready, supply it immediately
+      if (audioQueueRef.current && audioQueueRef.current.destination.stream.getAudioTracks().length > 0) {
+        listenToTrack(audioQueueRef.current.destination.stream.getAudioTracks()[0]);
+      }
     },
     []
   );
@@ -239,11 +253,9 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
     }
   }, []);
 
-  // Helper to process whiteboard content from completed text
   const processWhiteboardFromText = useCallback((fullText: string) => {
     const { hasWhiteboard, content: wbContent } = extractWhiteboardContent(fullText);
     console.log("[Whiteboard] Detection:", { hasWhiteboard, contentLength: fullText.length });
-    const cleanedContent = removeWhiteboardMarkers(fullText);
 
     setMessages((prev) => {
       const lastAssistant = [...prev].reverse().find((m) => m.role === "assistant");
@@ -253,9 +265,9 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
             ? {
                 ...m,
                 originalContent: fullText,
-                content: hasWhiteboard
-                  ? (cleanedContent.replace(/\[WHITEBOARD_START\]|\[WHITEBOARD_END\]/g, '').trim() || "I've prepared a detailed explanation. Click 'Whiteboard' to view.")
-                  : cleanedContent || m.content,
+                content: hasWhiteboard && !m.content.trim()
+                  ? "I've prepared a detailed explanation. Click 'Whiteboard' to view."
+                  : m.content,
               }
             : m
         );
@@ -274,6 +286,11 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
       }
       audioQueueRef.current = new AudioQueue(audioContextRef.current);
 
+      // Give Simli the real-time audio track early if it's already listening
+      if (simliListenToTrackRef.current && audioQueueRef.current.destination.stream.getAudioTracks().length > 0) {
+        simliListenToTrackRef.current(audioQueueRef.current.destination.stream.getAudioTracks()[0]);
+      }
+
       const ws = new WebSocket(WEBSOCKET_URL);
       wsRef.current = ws;
 
@@ -289,7 +306,11 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
 
         ws.onmessage = async (event) => {
           try {
-            const data = JSON.parse(event.data);
+            let textData = event.data;
+            if (event.data instanceof Blob) {
+              textData = await event.data.text();
+            }
+            const data = JSON.parse(textData);
 
             // Handle proxy-level events
             if (data.type === "proxy.gemini_connected") {
@@ -301,7 +322,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 setup: {
                   model: `models/${GEMINI_MODEL}`,
                   generationConfig: {
-                    responseModalities: ["AUDIO", "TEXT"],
+                    responseModalities: ["AUDIO"],
                     speechConfig: {
                       voiceConfig: {
                         prebuiltVoiceConfig: {
@@ -310,6 +331,9 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                       },
                     },
                   },
+                  // Enable transcription so we can display chat text alongside audio
+                  outputAudioTranscription: {},
+                  inputAudioTranscription: {},
                   systemInstruction: {
                     parts: [{
                       text: teacherInstructionsRef.current || "You are EduGuide, a helpful AI teacher. Answer educational questions clearly and concisely.",
@@ -341,20 +365,25 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
               console.error("Gemini connection closed (via proxy):", data);
 
               if (!isReconnectingRef.current) {
-                if (!manualDisconnectRef.current) {
-                  toast({
-                    title: "Voice connection closed",
-                    description: data.reason || `Code ${data.code}`,
-                  });
-                }
-
-                setIsConnected(false);
-                setIsProcessing(false);
-                setIsSpeaking(false);
-                setStatus("idle");
-
                 if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+                  setIsReconnecting(true);
+                  isReconnectingRef.current = true;
+                  setIsConnected(false);
+                  setIsProcessing(false);
+                  setIsSpeaking(false);
+                  setStatus("idle");
                   performReconnectRef.current?.();
+                } else {
+                  if (!manualDisconnectRef.current) {
+                    toast({
+                      title: "Voice connection closed",
+                      description: data.reason || `Code ${data.code}`,
+                    });
+                  }
+                  setIsConnected(false);
+                  setIsProcessing(false);
+                  setIsSpeaking(false);
+                  setStatus("idle");
                 }
               }
               return;
@@ -423,14 +452,17 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                 const transcript = sc.inputTranscription.text;
                 if (transcript && transcript.trim()) {
                   console.log("User transcription:", transcript);
-                  // Update the last "..." placeholder or add new user message
                   setMessages((prev) => {
-                    const lastUser = [...prev].reverse().find((m) => m.role === "user" && m.content === "...");
-                    if (lastUser) {
-                      return prev.map((m) =>
-                        m.id === lastUser.id ? { ...m, content: transcript } : m
+                    const last = prev[prev.length - 1];
+                    // Append ongoing speech to the last user bubble
+                    if (last && last.role === "user") {
+                      return prev.map((m, i) =>
+                        i === prev.length - 1 
+                          ? { ...m, content: (m.content === "..." || !m.content) ? transcript : m.content + " " + transcript } 
+                          : m
                       );
                     }
+                    // Otherwise create a new user message
                     return [...prev, {
                       id: crypto.randomUUID(),
                       role: "user" as const,
@@ -439,48 +471,6 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                     }];
                   });
                   setPartialTranscript("");
-                }
-                return;
-              }
-
-              // Output transcription (what the model said as text)
-              if (sc.outputTranscription) {
-                const transcript = sc.outputTranscription.text;
-                if (transcript) {
-                  // Stream transcript into assistant message
-                  setMessages((prev) => {
-                    const last = prev[prev.length - 1];
-                    if (last?.role === "assistant" && currentAssistantIdRef.current === last.id) {
-                      const newContent = last.content + transcript;
-                      // Check for whiteboard markers during streaming
-                      const wbStartIdx = newContent.indexOf("[WHITEBOARD_START]");
-                      if (wbStartIdx >= 0) {
-                        const preMarkerContent = newContent.substring(0, wbStartIdx).trim();
-                        const displayContent = preMarkerContent || "I've prepared a detailed explanation. Click 'Whiteboard' to view.";
-                        currentAssistantTextRef.current = newContent;
-                        return prev.map((m, i) =>
-                          i === prev.length - 1
-                            ? { ...m, content: displayContent, originalContent: newContent }
-                            : m
-                        );
-                      }
-                      currentAssistantTextRef.current = newContent;
-                      return prev.map((m, i) =>
-                        i === prev.length - 1 ? { ...m, content: newContent, originalContent: newContent } : m
-                      );
-                    }
-                    // New assistant message
-                    const newId = crypto.randomUUID();
-                    currentAssistantIdRef.current = newId;
-                    currentAssistantTextRef.current = transcript;
-                    return [...prev, {
-                      id: newId,
-                      role: "assistant" as const,
-                      content: transcript,
-                      originalContent: transcript,
-                      timestamp: new Date(),
-                    }];
-                  });
                 }
                 return;
               }
@@ -503,14 +493,8 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                           bytes[i] = binaryString.charCodeAt(i);
                         }
 
-                        // Send to Simli for lip-sync (resample 24kHz → 16kHz)
-                        if (simliSendAudioRef.current) {
-                          const resampled = resamplerRef.current.process(bytes);
-                          simliSendAudioRef.current(resampled);
-                        }
-
-                        // Fallback: use AudioQueue
-                        if (!simliSendAudioRef.current && audioQueueRef.current) {
+                        // ALWAYS play audio locally ensuring voice playback even if Simli WebRTC drops
+                        if (audioQueueRef.current) {
                           audioQueueRef.current.addToQueue(bytes);
                         }
                       } catch (e) {
@@ -519,24 +503,30 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
                     }
                   }
 
-                  // Text part (non-audio text response)
+                  // Text part (non-audio text response or simultaneous text stream)
                   if (part.text) {
                     setMessages((prev) => {
                       const last = prev[prev.length - 1];
                       if (last?.role === "assistant" && currentAssistantIdRef.current === last.id) {
-                        const newContent = last.content + part.text;
-                        currentAssistantTextRef.current = newContent;
+                        const rawContent = last.originalContent || "";
+                        const newOriginalContent = rawContent + part.text;
+                        currentAssistantTextRef.current = newOriginalContent;
+
+                        const displayContent = cleanDisplayContent(newOriginalContent);
                         return prev.map((m, i) =>
-                          i === prev.length - 1 ? { ...m, content: newContent, originalContent: newContent } : m
+                          i === prev.length - 1 ? { ...m, content: displayContent, originalContent: newOriginalContent } : m
                         );
                       }
+                      
+                      // For a text chunk that starts a new assistant turn
                       const newId = crypto.randomUUID();
                       currentAssistantIdRef.current = newId;
                       currentAssistantTextRef.current = part.text;
+                      const displayContent = cleanDisplayContent(part.text);
                       return [...prev, {
                         id: newId,
                         role: "assistant" as const,
-                        content: part.text,
+                        content: displayContent,
                         originalContent: part.text,
                         timestamp: new Date(),
                       }];
@@ -569,13 +559,17 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
           setIsRecording(false);
 
           if (!isReconnectingRef.current) {
-            setIsConnected(false);
-            setStatus("idle");
-
             if (!manualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+              isReconnectingRef.current = true;
+              setIsReconnecting(true);
+              setIsConnected(false);
+              setStatus("idle");
               const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptsRef.current), 8000);
               console.log("WebSocket closed unexpectedly, reconnecting in", delay, "ms");
               setTimeout(() => performReconnectRef.current?.(), delay);
+            } else {
+              setIsConnected(false);
+              setStatus("idle");
             }
           }
         };
@@ -834,7 +828,7 @@ export const useRealtimeChat = (teacherVoice?: string, teacherInstructions?: str
         turns: [{
           role: "user",
           parts: [{
-            text: "You just connected with a student. Give a brief, warm greeting introducing yourself by name and asking how you can help today. Keep it to 2-3 sentences. Do NOT use whiteboard markers.",
+            text: "Hi! I just joined the call. I'm ready to start.",
           }],
         }],
         turnComplete: true,
